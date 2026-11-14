@@ -11,6 +11,8 @@ import { ProviderError } from '../providers/contract.js';
 import { checkEcho } from '../voice/echo.js';
 
 const PAGE = fileURLToPath(new URL('./public/index.html', import.meta.url));
+// 자비스 모드: 캐릭터 얼굴과 대화만 크게 보이는 화면(토스 기기·휴대폰용) + 장치 점검. 설정은 PAGE(설정 모드)에서.
+const JARVIS_PAGE = fileURLToPath(new URL('./public/jarvis.html', import.meta.url));
 const VOICE_INPUT = fileURLToPath(new URL('./public/voice-input.js', import.meta.url));
 // 화면이 쓰는 정적 스크립트. 이 목록에 있는 파일만 내보낸다(경로 조작으로 다른 파일을 읽지 못하게).
 const STATIC_FILES = {
@@ -116,7 +118,7 @@ function sameToken(a, b) {
 }
 
 export function createAppServer(services, { token = randomBytes(24).toString('hex') } = {}) {
-  const page = () => readFileSync(PAGE, 'utf8').replace('__JARVIS_TOKEN__', token);
+  const page = (file = PAGE) => readFileSync(file, 'utf8').replace('__JARVIS_TOKEN__', token);
   let allowedHosts = new Set();
 
   const routes = [
@@ -206,6 +208,14 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
           'permissions-policy': 'microphone=(self), camera=(), geolocation=()',
         });
       }
+      if (req.method === 'GET' && (url.pathname === '/jarvis' || url.pathname === '/jarvis.html')) {
+        return send(res, 200, page(JARVIS_PAGE), {
+          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'",
+          'x-frame-options': 'DENY',
+          // 장치 점검에서 카메라 미리 보기를 시험할 수 있게 이 화면만 카메라를 허용(저장·전송 없음)
+          'permissions-policy': 'microphone=(self), camera=(self), geolocation=()',
+        });
+      }
       // 화면이 쓰는 정적 스크립트(자료 없음, 토큰 불필요). 정해 둔 파일만 내보낸다.
       const staticFile = req.method === 'GET' ? STATIC_FILES[url.pathname] : undefined;
       if (staticFile) {
@@ -288,7 +298,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     token,
     // 기본은 127.0.0.1에만 연다(이 기기 전용). port 0이면 빈 포트를 고른다.
     // host를 주면 그 주소로도 열어, 같은 와이파이의 다른 기기(예: 태블릿)에서 접속할 수 있다.
-    // 이때도 토큰 검사는 그대로라, 주소를 알아도 토큰 없이는 쓸 수 없다. 집처럼 믿는 망에서만 쓴다.
+    // 화면을 열면 토큰도 함께 받으므로, 같은 망에서 주소를 아는 누구나 쓸 수 있다. 집처럼 믿는 망에서만 쓴다.
     listen(port = 0, { host } = {}) {
       const bind = host ? '0.0.0.0' : '127.0.0.1';
       return new Promise((resolve, reject) => {

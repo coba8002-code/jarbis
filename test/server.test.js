@@ -161,3 +161,41 @@ test('재시작하면 실행 중이던 작업과 녹음 중이던 회의를 중�
   const info = (await second.call('GET', '/api/info')).json;
   assert.equal(info.platform, process.platform);
 });
+
+// 2026-11-14 자비스 모드(/jarvis): 캐릭터 얼굴·대화 중심 화면 + 장치 점검. 설정 모드(/)와 같은 보안 규칙을 따른다.
+test('자비스 모드 화면: 토큰이 들어가고, 이 화면만 카메라 시험을 허용하며, 외부 자원을 쓰지 않는다', async (t) => {
+  const { app, call } = await start(t);
+  const r = await call('GET', '/jarvis', undefined, { token: null });
+  assert.equal(r.status, 200);
+  assert.match(r.text, new RegExp(`content="${app.token}"`), '실행별 토큰이 화면에 들어감');
+  assert.match(r.headers['content-security-policy'], /default-src 'self'/);
+  assert.match(r.headers['content-security-policy'], /frame-ancestors 'none'/);
+  assert.equal(r.headers['permissions-policy'], 'microphone=(self), camera=(self), geolocation=()');
+  // 설정 모드는 지금처럼 카메라를 막는다
+  const settings = await call('GET', '/', undefined, { token: null });
+  assert.equal(settings.headers['permissions-policy'], 'microphone=(self), camera=(), geolocation=()');
+  // 화면은 이 서버의 정적 스크립트만 불러오고, 외부 주소·외부 스크립트가 없다
+  assert.doesNotMatch(r.text, /https?:\/\//);
+  assert.deepEqual([...r.text.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort(), ['/static/avatar.js', '/static/voice-input.js']);
+  for (const s of ['/static/avatar.js', '/static/voice-input.js']) assert.equal((await call('GET', s, undefined, { token: null })).status, 200);
+  // 다른 호스트 이름으로는 거부(DNS 리바인딩 방지는 그대로)
+  assert.equal((await call('GET', '/jarvis', undefined, { token: null, host: 'evil.example' })).status, 421);
+});
+
+test('외부 접속 옵션(host)을 주면 그 주소로도 열리고, 주지 않으면 이 기기 전용이다', async (t) => {
+  const dataDir = dirname(tempDbPath());
+  const services = createServices({ dataDir, providers: new ProviderRegistry({ mock: createMockProvider('mock') }) });
+  const app = createAppServer(services);
+  const { port, url, lan } = await app.listen(0, { host: '192.0.2.10' });
+  t.after(async () => { await app.close(); services.close(); });
+  assert.equal(lan, true);
+  assert.equal(url, `http://192.0.2.10:${port}/`);
+  assert.equal(app.server.address().address, '0.0.0.0');
+  const get = (host) => new Promise((resolve, reject) => {
+    const rq = httpRequest({ host: '127.0.0.1', port, path: '/jarvis', method: 'GET', headers: { host } }, (rs) => { rs.resume(); rs.on('end', () => resolve(rs.statusCode)); });
+    rq.on('error', reject); rq.end();
+  });
+  assert.equal(await get(`192.0.2.10:${port}`), 200, '허용한 주소');
+  assert.equal(await get(`127.0.0.1:${port}`), 200, '이 기기 주소');
+  assert.equal(await get(`evil.example:${port}`), 421, '그 밖의 주소는 거부');
+});

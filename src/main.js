@@ -61,7 +61,10 @@ const app = createAppServer(services);
 try {
   const { url, lan } = await app.listen(port, { host });
   console.log(`JARVIS 화면: ${url}`);
-  if (lan) console.log('※ 같은 와이파이의 다른 기기에서도 이 주소로 접속할 수 있음(토큰 필요). 집처럼 믿는 망에서만 쓰세요.');
+  if (lan) {
+    console.log(`자비스 모드: ${url}jarvis`);
+    console.log('※ 같은 와이파이에 있는 누구나 이 주소로 JARVIS를 열고 쓸 수 있음(화면을 열면 토큰도 함께 받음). 집처럼 믿는 망에서만 쓰세요.');
+  }
   console.log(`데이터 폴더: ${dataDir}`);
   if (services.recovered.missions.length || services.recovered.meetings.length) {
     console.log(`재시작 복원: 중단 처리한 작업 ${services.recovered.missions.length}개, 회의 ${services.recovered.meetings.length}개`);
