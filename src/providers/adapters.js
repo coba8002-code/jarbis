@@ -119,25 +119,38 @@ function claude(env, fetchImpl) {
 
 function ollama(env, fetchImpl) {
   const name = 'ollama';
+  const noThink = new Set(); // 생각(think)을 받지 않는 모델(주소|모델)
   return {
     name,
     async *stream(request, { signal, expect } = {}) {
       validateRequest(name, request);
       throwIfAborted(name, signal);
       const { baseUrl, model } = resolve(name, env, request, expect);
-      const res = await send(name, fetchImpl, `${baseUrl}/api/chat`, {
+      // request.think가 true/false로 정해졌을 때만 넘긴다(생각 끄기 = 빠른 답, T097). 없으면 모델 기본값.
+      // format('json')·options(temperature 등)·keepAlive: 판정처럼 짧은 JSON 답이 필요할 때만 넘긴다.
+      // 생각(think)을 모르는 모델(gemma3 등)은 400 "does not support thinking"을 돌려주므로, 한 번만 think 없이 다시 보내고 기억한다(2026-11-15 토스 기기 옆 PC).
+      const body = (withThink) => JSON.stringify({
+        model, messages: request.messages, stream: true,
+        ...(withThink ? { think: request.think } : {}),
+        ...(request.format === 'json' ? { format: 'json' } : {}),
+        ...(request.options && typeof request.options === 'object' ? { options: request.options } : {}),
+        ...(typeof request.keepAlive === 'string' ? { keep_alive: request.keepAlive } : {}),
+      });
+      const key = `${baseUrl}|${model}`;
+      const useThink = typeof request.think === 'boolean' && !noThink.has(key);
+      const post = (withThink) => send(name, fetchImpl, `${baseUrl}/api/chat`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        // request.think가 true/false로 정해졌을 때만 넘긴다(생각 끄기 = 빠른 답, T097). 없으면 모델 기본값.
-        // format('json')·options(temperature 등)·keepAlive: 판정기처럼 짧은 JSON 답이 필요할 때만 넘긴다.
-        body: JSON.stringify({
-          model, messages: request.messages, stream: true,
-          ...(typeof request.think === 'boolean' ? { think: request.think } : {}),
-          ...(request.format === 'json' ? { format: 'json' } : {}),
-          ...(request.options && typeof request.options === 'object' ? { options: request.options } : {}),
-          ...(typeof request.keepAlive === 'string' ? { keep_alive: request.keepAlive } : {}),
-        }),
+        body: body(withThink),
       }, { signal, secrets: [] });
+      let res;
+      try {
+        res = await post(useThink);
+      } catch (e) {
+        if (!useThink || e.code !== 'bad_request' || !/does not support thinking/i.test(e.message)) throw e;
+        noThink.add(key);
+        res = await post(false);
+      }
       for await (const line of readLines(name, res.body, signal)) {
         if (!line.trim()) continue;
         const msg = parseJson(name, line);

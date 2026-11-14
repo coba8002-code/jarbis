@@ -1,6 +1,6 @@
 # 막힌 항목과 미검증
 
-2026-11-14 갱신. 1단계(기기 없는 기본 기능) Windows 구현 후.
+2026-11-15 갱신(토스 프론트 실기 설치). 2026-11-14 갱신. 1단계(기기 없는 기본 기능) Windows 구현 후.
 
 | 항목 | 확인 내용 | 필요한 것 |
 | --- | --- | --- |
@@ -13,7 +13,7 @@
 | Mac | 두 기기 각각 단독 실행으로 결정. Windows에서는 화면까지 실행 확인. macOS에서는 미실행 | Mac에서 `npm test`, `npm start` 확인(T137) |
 | 음성 출력 | OS 내장 합성 계층 있음. Windows 한국어 음성(Heami)으로 WAV 합성 확인. 스피커 청취·화면 연결 안 함. macOS say 미검증 | 사용자 청취(T148: `node scripts/tts-smoke.js <폴더> --speak` 또는 화면에서 소리 읽기 켜기), Mac(T146). 화면 연결은 완료(T145) |
 | 음성 입력 | 마이크·발화 감지 없음. 이 Windows PC에는 내장 한국어 인식기가 없음(System.Speech 0개, 받아쓰기 언어 없음) | 받아쓰기·마이크 녹음 화면 구현 완료(녹음 승인 받음). **이 Windows PC에는 마이크가 없어** 실제로 말해 보는 확인을 못 함 | 마이크 연결 뒤 또는 Mac에서 확인(T218), 듣기 모드 에코 대책(T219), Mac 설치(T213) |
-| 토스 프론트 | 제품·버전·SDK·연결 방식 자료 없음 | 원본, 제조사 문서, 실제 장치 |
+| 토스 프론트 | 2026-11-15 PLF01WH(RK3399)에 LineageOS 18.1(arm64, Android 11) 설치 완료, JARVIS 앱 0.2.1 설치·실행·재부팅 뒤 자동 열기 확인. 옆 PC(DESKTOP-IJJP8R7)와 USB(adb reverse)로 연결, 글 대화 왕복 확인(gemma3:4b). 토스 SDK는 없음(쓰지 않음) | 실제 마이크로 말하기 확인(T321), 기기 음성 엔진(T322), USB 없이 연결(T323) — 아래 "2026-11-15 토스 프론트 실기" |
 
 ## 실제 확인 (Windows 11, Node 24.19.0, SQLite 3.53.3)
 
@@ -162,3 +162,31 @@ Windows의 실제 글 대화(Ollama), 기억 반영, 캐릭터 편집·적용·�
 4. 클라우드: `.env.local.example`을 `.env.local`로 복사해 키를 채운 뒤, `node scripts/cloud-smoke.js claude openai`로 계획을 보고
    `--yes-send`를 붙여 실행한다(T096). 공급자당 시험 요청 3회.
 - 기록: 수정 전 스크립트가 키 없이 api.anthropic.com에 틀린 키 요청 1회를 보냈다(고정 시험 문장, 개인 자료 없음, 401). 수정 후 0회.
+
+## 2026-11-15 토스 프론트 실기 (PLF01WH · LineageOS 18.1)
+
+### 된 것
+
+- 기기: 토스 프론트 1세대 PLF01WH(RK3399), LineageOS 18.1 arm64(Android 11, API 30), 800x1280 세로, Pico GApps. 토스 펌웨어·SDK는 빠짐. 원본 백업(`C:\toss-front\backup_rkdev\super.img`, 옆 PC)은 그대로.
+- 연결: 기기 앱 → `https://127.0.0.1:4780` → USB `adb reverse` → 옆 PC(DESKTOP-IJJP8R7)의 JARVIS 서버(`--https`, 127.0.0.1 전용). 인증서는 지문으로만 믿음.
+  - 이유: 개발 PC(DESKTOP-UP3FQHL, 192.168.0.x, Tailscale ldh97710)는 기기(192.168.45.x, Tailscale coba8002)와 망·계정이 달라 닿지 않는다. 옆 PC는 같은 와이파이지만 Windows 방화벽이 4780을 막고 관리자 권한이 없어 열지 못했다. USB는 방화벽·공개 없이 바로 된다.
+- 옆 PC에 설치: 프로젝트 사본(`C:\Users\coba8\jarvis-hybrid`, git archive, `.env.local`에는 `JARVIS_OLLAMA_MODEL=gemma3:4b`와 openssl 경로만, 키 없음), Ollama(winget) + gemma3:4b, whisper.cpp v1.9.2 CPU판·large-v3-turbo q5_0·silero VAD(sha256 3개 모두 기록값과 일치). `node src/main.js --doctor` 8개 모두 정상.
+- 시작프로그램: `jarvis-tossfront.cmd` → `scripts\tossfront-bridge.ps1`(서버 켜기 + adb reverse 15초마다). 로그인하면 자동으로 켜짐.
+- 기기 앱 0.2.1: 전체 화면, 잠금 화면 위 표시, 부팅 때 자동 열기(`appops SYSTEM_ALERT_WINDOW allow` 적용함), 연결 실패 시 15초마다 다시 연결, 자비 아이콘. 마이크·카메라 권한은 adb로 줌. 전체 화면 안내 창은 `immersive_mode_confirmations`로 끔.
+- 실기 확인: 연결 설정 → 자비스 모드 화면, 글 질문 "What is 7+8? Answer briefly in Korean" → "열다섯…"(gemma3:4b), 장치 점검(앱·보안 연결·서버 61ms·PC 점검 8개 정상), 기기 재부팅 → 잠금 없이 JARVIS가 바로 뜨고 연결됨.
+- 기기 음성: LineageOS에 TTS 엔진이 없고 WebView에는 speechSynthesis가 없음 → PC 음성 대체(`/api/tts`, Windows Heami) 추가. 기기 앱 소리 재생 시작은 확인(dumpsys audio AAudio started), 사람 귀로는 미확인.
+- 장치: 스피커 있음. 입력 장치는 Built-In Mic·HDMIIn로 보이고 앱 녹음은 시작됨. 근접 센서 없음. 카메라 앞쪽 2개. 터치(ilitek_ts) 정상.
+- 저장소 커밋(로컬만, 푸시 안 함): Claude Code 작업분 스냅샷, 앱 0.2.0, PC 음성 대체, 앱 0.2.1·생각 모르는 모델 대응·다리 스크립트·문서. `npm test` 결과는 tasks.md Phase 24.
+
+### 남은 것 (사람이 해야 함)
+
+1. 마이크: 기기 앞에서 마이크 단추를 누르고 말해 보기. 첫 시험은 "말소리를 듣지 못했어요"였다(말했는지 미확인). 계속 안 되면 내장 마이크 배선이 없거나 꺼진 것 → USB 마이크(OTG) 필요.
+2. 기기 음성(선택): Play 스토어에 구글 계정으로 로그인 → "Google 음성 인식 및 합성" 설치 → 설정 → 시스템 → 언어 → 텍스트 음성 변환에서 한국어. 없어도 PC 음성으로 읽는다.
+3. USB 없이 쓰기(선택): 옆 PC 관리자 PowerShell에서 `netsh advfirewall firewall add rule name="JARVIS 4780" dir=in action=allow protocol=TCP localport=4780 remoteip=192.168.45.0/24` 실행 뒤 서버를 `--host 192.168.45.128`로 켜고 앱 주소를 바꾼다. 또는 개발 PC를 coba8002 Tailscale에 공유해 큰 모델(gemma4:12b, CUDA whisper)을 쓴다.
+4. 클라우드 키: 옆 PC 사본에는 키가 없다(이 작업에서 키를 옮기지 않음). 필요하면 사용자가 옆 PC `.env.local`에 직접 적는다.
+
+### 위험·주의
+
+- 옆 PC가 꺼지거나 USB가 빠지면 앱은 "연결하지 못했어요"를 보이고 15초마다 다시 붙는다.
+- 앱은 디버그 서명(android/out/debug.keystore, GitHub 제외). 이 열쇠를 잃으면 앱을 지우고 다시 깔아야 한다(설정 다시 입력).
+- 시스템 odex 일부가 깨져 있어 다른 앱이 꺼질 수 있다(설정 앱은 `cmd package compile -m speed -f`로 고침).

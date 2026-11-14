@@ -270,7 +270,7 @@
 - [x] T275 장치 점검(자비스 모드 안): 연결 방식·서버·화면·터치·네트워크·장치 목록·마이크·카메라·스피커·움직임 센서·전원·진동. 마이크·카메라·스피커는 사용자가 눌러야만 시험, 저장·전송 없음 (public/jarvis.html)
 - [x] T276 와이파이 접속에서 말하기·마이크·카메라를 쓰기 위한 보안 연결(HTTPS) 옵션 `--https`: 데이터 폴더 tls/에 이 PC 전용 자체 서명 인증서(127.0.0.1·localhost·--host 주소)를 openssl로 한 번 만들어 씀. 시작 때 인증서 지문 출력 (src/app/tls.js, server.js, main.js, test/tls.test.js)
 - [ ] T278 휴대폰·토스 기기에서 `https://<주소>/jarvis`로 열어(인증서 경고 확인 뒤) 말하기·마이크·카메라 실제 확인 — 사람이 해야 함
-- [ ] T277 토스 기기에서 브라우저 대신 앱처럼 쓰기 — 앱은 만들었음(T291). 남은 것: 토스 기기에 LineageOS 올리기(사용자가 builder 안내대로 직접, 펌웨어 업데이트 뒤라 builder 작성자 확인 권장) 후 앱 설치
+- [x] T277 토스 기기에서 브라우저 대신 앱처럼 쓰기 — 2026-11-15 PLF01WH에 LineageOS 18.1(arm64, Android 11)을 올린 뒤 JARVIS 앱 0.2.1 설치·실행 확인(Phase 24)
 
 ## Phase 23: 2026-11-14 치이카와 대화 모드·디자인 고도화 (사용자 요청)
 
@@ -319,7 +319,7 @@
 - [x] T311 Figma 파일 "JARVIS Hybrid 2.0 — 디자인"(https://www.figma.com/design/5FJuECJXu9UZ8cPXJyhLs0): 00 계획 / 01 기초(색 15개 밝음·어두움, 간격 6, 둥글기 4, 글자 스타일 8, 웹 코드 이름 var(--…)) / 02 부품(Button 3변형, IconButton 2, Badge 4, Bubble 2, Card, Tile, CheckRow, ConfirmDialog — 모두 변수에 묶음) / 03 화면(대기·밝음, 부르면 대답하기·말하는 중·어두움, 쉬는 화면, 스킬 동의 창) / 04 캐릭터(자비 상태 시트)
 - [x] T312 오리지널 캐릭터 "자비"(귤에서 떠올린 둥근 몸): Higgsfield GPT Image 2.6으로 기본 4안 → 1안 고름 → 같은 모습으로 듣는 중·생각 중·말하는 중 1·2. 5장을 같은 크기·같은 가운데(512px, 투명 PNG)로 맞춰 src/character/mascot에 넣음
 - [x] T313 앱 반영: 친구 고르기 맨 앞 "오리지널" 묶음에 자비(미리 보기 그림), 고르면 그 캐릭터에 그림 얼굴 5장이 자동으로 들어감(이미 그림이 있으면 덮지 않음). /static/mascot/*.png 제공
-- [ ] T314 앱 아이콘(안드로이드 런처)에 자비 넣기 — 아직
+- [x] T314 앱 아이콘(안드로이드 런처)에 자비 넣기 — 2026-11-15 자비 대기 그림(src/character/mascot/jabi/idle.png)을 둥근 바탕에 얹어 mipmap 5종(android/res/)
 - [x] T315 과일·간식 친구 12명(오리지널): 사용자가 치이카와·산리오 실제 그림을 원했으나 원작 그림은 만들지 않기로 하고(검색해 가져오기·따라 그리기 포함), 사용자가 고른 대안 "분위기만 닮은 오리지널"로 진행. 치이카와·산리오 목록의 성격(말투)만 이어받고 모양·이름은 새로: 콩떡·소다·레몬·밤톨·딸기·복숭아·블루베리·구름빵·호떡·키위·청포도·가지. 그림은 자비 그림체로 Higgsfield에서 기본 모습(높은 품질) + 상태 4장(중간 품질, 기본 모습 참고)씩 60장, 512px로 맞춰 src/character/mascot/<key>/. 친구 고르기 "오리지널" 묶음(자비 + 12명), 고르면 그림 얼굴 자동 적용. 치이카와·산리오 이름 목록은 그대로(도형 얼굴, 사용자가 권리 있는 그림을 넣을 수 있음)
 - [x] T316 동물 친구 10마리로 다시 그림(사용자 요청 "곰, 카피바라, 나무늘보, 고양이, 강아지, 원숭이, 기니피그, 피카츄, 꼬부기, 여우 … 엄청 귀엽게"): 과일 친구 12명을 빼고 곰돌·카피·늘보·나비(고양이)·콩이(강아지)·몽이(원숭이)·기니(기니피그)·토리(햄스터)·솔이(초록 거북이)·여우비(여우)로 교체. 피카츄·꼬부기는 포켓몬 원작 캐릭터라 그리지 않고 햄스터·초록 거북이로 바꿈(전기·빨간 볼·파란색·꼬리 소용돌이 같은 특징 없이). 말투는 치이카와·산리오 목록에서 이어받음. Higgsfield 기본 10장(높은 품질) + 상태 40장(중간 품질), 512px로 맞춰 src/character/mascot/<key>/
 - [ ] T283 치이카와 그림 넣기 — 그림은 사용자가 쓸 권리를 확인하고 설정 모드 → 캐릭터 → 그림 얼굴에서 직접 넣어야 함(이 작업에서는 그리거나 받아 오지 않음)
@@ -1286,3 +1286,26 @@ holdout에서 아직 놓친 10개: "…어떻게 돼?"로 묻는 나이·둘레�
 - 원본 affaan-m/ECC(옛 everything-claude-code, MIT, d2ef268)를 세션 임시 폴더에 얕게 받아 검토. 스킬 314개 중 이 프로젝트에 맞는 11개만 프로젝트 `.claude/skills`에 복사(accessibility, api-design, coding-standards, tdd-workflow, verification-loop, security-review, search-first, eval-harness, database-migrations, design-system, git-workflow). 출처·라이선스는 `.claude/skills/_ecc/`.
 - 위험 문구 검사 뒤 뺀 것: security-scan(전역 npm 설치), strategic-compact(전역 settings.json hook). 전역 `~/.claude`·hook·MCP 설정은 바꾸지 않음. ECC 스크립트는 넣지 않음.
 - 한계: 새 스킬 목록은 다음 Claude Code 세션부터 잡힌다(이 세션에서는 확인 못 함).
+
+## Phase 24: 2026-11-15 토스 프론트(PLF01WH, LineageOS 18.1) 실기 설치 (사용자 요청)
+
+기기: 토스 프론트 1세대 PLF01WH(RK3399), LineageOS 18.1 arm64(Android 11, API 30), 800x1280 세로, 토스 SDK 없음. 화면 옆 PC(DESKTOP-IJJP8R7)와 USB(adb)로 연결.
+연결 방식: 기기 앱 → https://127.0.0.1:4780 → adb reverse(USB) → 옆 PC의 JARVIS 서버. 개발 PC(DESKTOP-UP3FQHL)는 다른 Tailscale 계정·다른 망이라 기기에서 닿지 않아, 옆 PC에 같은 코드(git archive)를 두고 Ollama(gemma3:4b)·whisper CPU를 새로 설치함.
+
+- [x] T317 JARVIS 앱 0.2.x: 전체 화면(상태 줄·단추 줄 숨김), 잠금 화면 위에 보이기·화면 켜기, 부팅 때 자동 열기(BootReceiver + adb appops SYSTEM_ALERT_WINDOW allow), 연결 실패 시 15초마다 다시 연결, 자비 아이콘. 실기: 설치·권한(마이크·카메라)·연결 설정·인증서 지문·자비스 모드 화면·재부팅 뒤 자동 열기 확인 (android/)
+- [x] T318 PC 음성 대체 `POST /api/tts`: 기기에 음성 엔진이 없고(LineageOS에 TTS 엔진 없음) WebView에 speechSynthesis가 없어 답을 못 읽던 문제. PC 음성(Windows Heami)으로 WAV를 만들어 기기 스피커로 재생. 실기: 기기 앱의 AAudio 재생 시작 확인(dumpsys audio). 사람 귀로 듣기는 미확인 (server.js, services.js, jarvis.html, test/tts.test.js)
+- [x] T319 Ollama 생각(think)을 모르는 모델(gemma3:4b): 400 "does not support thinking"이면 think 없이 한 번 다시 보내고 기억. 실기: 기기에서 글 질문 → 한국어 답(첫 질문 약 4초) (adapters.js, test/ollama-nothink.test.js)
+- [x] T320 옆 PC 다리 `scripts/tossfront-bridge.ps1`: 서버가 꺼져 있으면 켜고 adb reverse를 15초마다 다시 건다. 옆 PC 시작프로그램에 등록(로그인 때 자동)
+- [ ] T321 기기 마이크로 실제 말해 보기: 앱에서 녹음은 시작됨(입력 장치 Built-In Mic·HDMIIn, WebView 녹음 CAMCORDER). 첫 시험은 "말소리를 듣지 못했어요" — 사용자가 말했는지·마이크 배선이 살아 있는지 미확인. 안 되면 USB 마이크(OTG) 필요 — 사람이 해야 함
+- [ ] T322 기기 음성 엔진: Play 스토어에서 "Google 음성 인식 및 합성"(com.google.android.tts)을 받으면 기기 음성(앱 TTS)을 씀(지금은 PC 음성 대체). 구글 계정 로그인은 사용자가
+- [ ] T323 와이파이·Tailscale로 붙기(USB 없이): 옆 PC 방화벽이 4780을 막음(관리자 권한 필요). 또는 개발 PC를 기기와 같은 Tailscale 계정에 넣거나 공유해야 큰 모델(gemma4:12b·CUDA whisper)을 씀
+- [ ] T324 근접 센서 없음(기기 센서 목록에 없음) → 깨우기는 화면 누르기·카메라로 깨우기만. 카메라(앞 2개)로 깨우기·얼굴 알아보기 실기 확인 — 사람이 해야 함
+
+
+### Phase 24 검사 결과 (2026-11-15 KST)
+
+- 개발 PC(Node 24.19.0): 전체 npm test 324개, 322 통과·2 건너뜀·0 실패. 새 검사: /api/tts 3개, think 모르는 Ollama 모델 2개.
+- 옆 PC(Node 24.11.1): doctor 8개 모두 정상, 글 질문 → 한국어 답(로컬 gemma3:4b, 첫 성공 약 4초), TTS WAV 149,944바이트 약 0.7초 합성·임시 파일 0개. 기기 앱 AAudio 재생 시작 확인.
+- 기기 재부팅 2회: 0.2.0에서는 잠금 화면이 가려 0.2.1에 setShowWhenLocked/setTurnScreenOn 추가. 0.2.1 재부팅 뒤 앱이 최상단으로 자동 실행됨.
+- 스크린샷(작업자 box): /workspace/jarvis-tf/02-jarvis.png, 05-answer-speaking.png, 06-check.png, 07-after-reboot.png, 08-mic.png. 옆 PC에도 C:\Users\coba8\jarvis-shots에 보관.
+- 사용자 실제 조작이 관찰되어 이후 마이크·카메라 자동 조작은 중단. 실제 발화·스피커 청취는 사람이 확인해야 함.

@@ -83,6 +83,9 @@ public class MainActivity extends Activity implements SensorEventListener {
         super.onCreate(state);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        // 키오스크: 잠금 화면 위에도 보이고, 부팅 때 화면을 켠다(토스 기기처럼 늘 켜 두는 화면용)
+        if (Build.VERSION.SDK_INT >= 27) { setShowWhenLocked(true); setTurnScreenOn(true); }
+        else getWindow().addFlags(WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON);
         sensors = (SensorManager) getSystemService(SENSOR_SERVICE);
         proximity = sensors == null ? null : sensors.getDefaultSensor(Sensor.TYPE_PROXIMITY);
         tts = new TextToSpeech(this, status -> {
