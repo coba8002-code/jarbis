@@ -3,6 +3,7 @@ import { AppError } from '../errors.js';
 import { nowIso } from '../store/db.js';
 import { looksLikeSecret } from '../security/secrets.js';
 import { defaultExecutors } from './executors.js';
+import { tierOf, PENDING_TTL_MS } from './tiers.js';
 
 const TERMINAL = new Set(['rejected', 'cancelled', 'done', 'failed', 'interrupted']);
 const EDITABLE = new Set(['pending', 'approved']);
@@ -55,6 +56,7 @@ export class MissionControl {
   #toMission(row) {
     return {
       ...row,
+      tier: tierOf(row.kind), // 위험 단계(PC 규칙, tiers.js)
       content: JSON.parse(row.content),
       result: row.result == null ? null : JSON.parse(row.result),
     };
@@ -148,6 +150,32 @@ export class MissionControl {
 
   reject(id) {
     return this.#transition(id, ['pending'], 'rejected');
+  }
+
+  // 위험 "낮음" 작업 한꺼번에 승인. 각 항목은 사용자가 화면에서 본 내용 버전이 있어야 한다(버전이 다르면 그 항목만 실패).
+  // 위험 "높음"은 하나씩만 승인한다.
+  approveLow(items) {
+    if (!Array.isArray(items) || items.length === 0 || items.length > 50) throw new AppError('invalid_input', 'items는 1~50개');
+    return items.map(({ id, version }) => {
+      try {
+        const row = this.#row(Number(id));
+        if (tierOf(row.kind) !== 'low') throw new AppError('invalid_state', `미션 ${row.id}은(는) 위험 높음이라 하나씩 승인해야 함`);
+        return { id: row.id, ok: true, mission: this.approve(row.id, version) };
+      } catch (e) {
+        return { id: Number(id), ok: false, error: { code: e.code ?? 'internal', message: e.message } };
+      }
+    });
+  }
+
+  // 오래된 승인 대기 정리: maxAgeMs(기본 24시간)보다 오래 기다린 작업은 취소로 바꾼다(실행하지 않음). 바꾼 번호를 돌려준다.
+  expireStale({ now = Date.now(), maxAgeMs = PENDING_TTL_MS } = {}) {
+    const cut = new Date(now - maxAgeMs).toISOString();
+    const old = this.db.prepare("SELECT id FROM missions WHERE status = 'pending' AND updated_at < ?").all(cut);
+    const done = [];
+    for (const { id } of old) {
+      try { this.#transition(id, ['pending'], 'cancelled', {}, 'expired: 24시간 넘게 승인 대기'); done.push(id); } catch { /* 그 사이 바뀐 것은 둔다 */ }
+    }
+    return done;
   }
 
   cancel(id) {

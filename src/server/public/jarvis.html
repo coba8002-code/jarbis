@@ -4,91 +4,357 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="jarvis-token" content="__JARVIS_TOKEN__">
-<meta name="theme-color" content="#0f172a">
+<meta name="theme-color" content="#fffaf3">
 <title>JARVIS</title>
 <style>
-  :root { --bg: #f8fafc; --panel: #ffffff; --line: #e2e8f0; --text: #0f172a; --muted: #64748b; --accent: #2563eb; --me: #2563eb; --me-text: #ffffff; --bot: #eef2f7; --ok: #15803d; --warn: #b45309; --bad: #b91c1c; }
+  /* 자비스 모드 v3(2026-11-14, 사용자 참고 화면 반영: 캐릭터 무대가 화면 위를 채우는 캐릭터 앱 형태 + 친구 고르기 카드 줄 + 둥근 알약 입력 막대).
+     페이지 형태: 카탈로그 밖 대화 화면(사용자 명시 요청) + 요약 타일(Pattern 4, 읽기 전용).
+     색: 바탕 60% · 카드 30% · 강조(주황 한 가지) 10%. 무대 색은 적용한 캐릭터의 얼굴 색을 옅게 섞어 씀.
+     테두리 먼저, 그림자 알파 0.08 미만, 유리 효과 없음. 글자 굵기 400·500·600만. 간격 8의 배수. */
+  :root {
+    --canvas: #fffaf3; --surface: #ffffff; --surface-2: #f7f1ea; --line: rgba(60, 40, 20, .1);
+    --text: #1f1a17; --muted: #6b625b; --accent: #c2410c; --accent-text: #ffffff; --accent-soft: #ffedd5;
+    --ok: #15803d; --warn: #b45309; --bad: #b91c1c;
+    --shadow: 0 2px 8px rgba(60, 40, 20, .06); --shadow-up: 0 4px 16px rgba(60, 40, 20, .07);
+    --r-card: 24px; --r-ctl: 16px;
+    --char: #f5a524; --tint-1: #fff1cc; --tint-2: #ffe1b3;
+  }
+  @supports (color: color-mix(in srgb, red 50%, white)) {
+    :root { --tint-1: color-mix(in srgb, var(--char) 16%, var(--canvas)); --tint-2: color-mix(in srgb, var(--char) 34%, var(--canvas)); }
+  }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #0b1220; --panel: #111a2e; --line: #23304d; --text: #e5e7eb; --muted: #94a3b8; --accent: #60a5fa; --me: #2563eb; --me-text: #ffffff; --bot: #1b2640; --ok: #4ade80; --warn: #fbbf24; --bad: #f87171; }
+    :root {
+      --canvas: #17130f; --surface: #211b16; --surface-2: #2a231c; --line: rgba(255, 240, 220, .12);
+      --text: #f3ede6; --muted: #b8ada1; --accent: #fb923c; --accent-text: #1b0f08; --accent-soft: #3a2616;
+      --ok: #4ade80; --warn: #fbbf24; --bad: #f87171;
+      --shadow: inset 0 1px 0 rgba(255, 255, 255, .05); --shadow-up: inset 0 1px 0 rgba(255, 255, 255, .05);
+      --tint-1: #2a2016; --tint-2: #34271a;
+    }
+    @supports (color: color-mix(in srgb, red 50%, white)) {
+      :root { --tint-1: color-mix(in srgb, var(--char) 14%, var(--canvas)); --tint-2: color-mix(in srgb, var(--char) 26%, var(--canvas)); }
+    }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; margin: 0; }
-  body { background: var(--bg); color: var(--text); font: 17px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", sans-serif; display: flex; flex-direction: column; }
-  header { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); background: var(--panel); }
-  header h1 { font-size: 18px; margin: 0; flex: 1; }
-  header button, header a { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 15px; text-decoration: none; display: inline-flex; align-items: center; cursor: pointer; }
-  header button[aria-pressed="true"] { border-color: var(--accent); color: var(--accent); }
-  main { flex: 1; min-height: 0; display: flex; }
-  #talk { flex: 1; min-height: 0; display: flex; flex-direction: column; align-items: stretch; }
-  #stage { display: flex; flex-direction: column; align-items: center; padding: 16px 16px 8px; gap: 6px; }
-  #face { width: 168px; height: 168px; display: flex; align-items: center; justify-content: center; }
-  #face svg { width: 100%; height: 100%; }
-  #state { color: var(--muted); font-size: 16px; min-height: 24px; }
-  #log { flex: 1; min-height: 0; overflow-y: auto; padding: 8px 16px 12px; display: flex; flex-direction: column; gap: 10px; }
-  .msg { max-width: min(78%, 640px); padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; word-break: break-word; }
-  .msg.me { align-self: flex-end; background: var(--me); color: var(--me-text); border-bottom-right-radius: 4px; }
-  .msg.bot { align-self: flex-start; background: var(--bot); border-bottom-left-radius: 4px; }
-  .msg.note { align-self: center; background: transparent; color: var(--muted); font-size: 14px; padding: 2px 8px; }
-  #bar { display: flex; gap: 8px; padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--panel); }
-  #q { flex: 1; min-height: 52px; max-height: 140px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--text); font: inherit; resize: none; }
-  #bar button { min-width: 56px; min-height: 52px; padding: 0 16px; border: 0; border-radius: 14px; font: inherit; font-weight: 600; cursor: pointer; }
-  #send { background: var(--accent); color: #fff; }
-  #mic { background: var(--bot); color: var(--text); }
-  #mic[aria-pressed="true"] { background: var(--bad); color: #fff; }
-  #stop { background: transparent; color: var(--muted); border: 1px solid var(--line) !important; }
-  button:disabled { opacity: .5; cursor: default; }
+  body { background: var(--canvas); color: var(--text); font: 400 16px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased; }
+  h1, h2 { font-weight: 600; margin: 0; }
+  [hidden] { display: none !important; }
+  button, a, textarea { font: inherit; color: inherit; }
   button:focus-visible, a:focus-visible, textarea:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
-  #check { flex: 1; overflow-y: auto; padding: 16px; }
-  #check h2 { font-size: 18px; margin: 0 0 4px; }
-  #check p.lead { color: var(--muted); margin: 0 0 14px; font-size: 15px; }
-  .row { display: grid; grid-template-columns: 26px 1fr auto; gap: 10px; align-items: center; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel); margin-bottom: 8px; }
-  .row .mark { font-size: 18px; text-align: center; }
-  .row .name { font-weight: 600; }
+
+  /* 위쪽 막대: 작은 이름 + 둥근 아이콘 단추(툴팁 포함). 휴대폰에서는 무대 색과 이어진다. */
+  .bar { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 8px; padding: 8px 16px; background: var(--tint-1); }
+  .who { flex: 1; min-width: 0; }
+  .who h1 { font-size: 16px; line-height: 1.25; }
+  .icon { width: 44px; height: 44px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); border-radius: 50%; background: var(--surface); cursor: pointer; text-decoration: none; transition: background-color 150ms ease-out; }
+  .icon svg { width: 22px; height: 22px; }
+  .icon[aria-pressed="true"] { background: var(--accent-soft); border-color: transparent; }
+  @media (hover: hover) { .icon:hover { background: var(--surface-2); } }
+  .tipwrap { position: relative; display: inline-flex; }
+  .tip { position: absolute; top: calc(100% + 8px); right: 0; z-index: 5; padding: 4px 8px; border-radius: 8px; background: var(--text); color: var(--canvas); font-size: 12px; line-height: 1.4; white-space: nowrap; opacity: 0; transform: translateY(-2px); pointer-events: none; transition: opacity 150ms ease-out, transform 150ms ease-out; }
+  .tipwrap:focus-within .tip { opacity: 1; transform: none; }
+  @media (hover: hover) { .tipwrap:hover .tip { opacity: 1; transform: none; } }
+  .composer .tip { top: auto; bottom: calc(100% + 8px); }
+  #mic-wrap .tip { right: auto; left: 0; }
+
+  main { flex: 1; min-height: 0; overflow-y: auto; }
+  .page { width: 100%; max-width: 720px; margin: 0 auto; padding: 0 16px 16px; display: flex; flex-direction: column; gap: 16px; }
+
+  /* 캐릭터 무대: 휴대폰에서는 화면 폭을 가득 채우고 아래만 둥글게, 넓은 화면에서는 둥근 카드 */
+  .hero { position: relative; margin: 0 -16px; padding: 8px 24px 24px; border-radius: 0 0 32px 32px; background: linear-gradient(180deg, var(--tint-1), var(--tint-2)); overflow: hidden; }
+  .hello { margin: 0; font-size: 14px; color: var(--muted); }
+  .hero-name { margin: 4px 0 8px; font-size: 28px; line-height: 1.2; letter-spacing: -.01em; overflow-wrap: anywhere; }
+  .stat { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); font-size: 14px; color: var(--muted); }
+  .stat b { color: var(--text); font-size: 16px; font-weight: 600; }
+  .scene { position: relative; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; min-height: 296px; padding-top: 16px; }
+  .say { position: relative; max-width: min(100%, 420px); margin-bottom: 16px; padding: 12px 16px; border: 1px solid var(--line); border-radius: 20px; background: var(--surface); box-shadow: var(--shadow); font-size: 16px; line-height: 1.5; text-align: center; transition: opacity 200ms ease-out, transform 200ms ease-out; }
+  .say::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; background: var(--surface); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
+  .say.out { opacity: 0; transform: translateY(4px); }
+  #face { width: 232px; height: 232px; display: flex; align-items: center; justify-content: center; transform-origin: 50% 90%; }
+  #face svg, #face img { width: 100%; height: 100%; object-fit: contain; }
+  .ground { width: 184px; height: 16px; margin-top: -8px; border-radius: 50%; background: rgba(60, 40, 20, .08); }
+  .state { margin-top: 16px; text-align: center; font-size: 14px; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 8px; }
+  .state i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+  .state[data-state="listening"] i { background: var(--bad); }
+  .state[data-state="thinking"] i { background: var(--warn); }
+  .state[data-state="speaking"] i { background: var(--ok); }
+  /* 캐릭터 움직임은 상태를 알리는 기능(글로도 함께 알림). 반복 주기는 캐릭터 연출용 예외. 움직임 줄이기면 멈춤. */
+  @keyframes breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.03); } }
+  @keyframes bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes sway { 0%, 100% { transform: rotate(-4deg); } 50% { transform: rotate(4deg); } }
+  #face[data-state="idle"] { animation: breathe 2.4s ease-in-out infinite; }
+  #face[data-state="listening"] { animation: breathe 1s ease-in-out infinite; }
+  #face[data-state="thinking"] { animation: sway 1.6s ease-in-out infinite; }
+  #face[data-state="speaking"] { animation: bob .48s ease-in-out infinite; }
+
+  /* 요약 타일(읽기 전용, 누르면 설정 화면의 그 탭) */
+  .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .tile { display: flex; flex-direction: column; gap: 8px; min-height: 96px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow); text-decoration: none; transition: background-color 150ms ease-out; }
+  @media (hover: hover) { .tile:hover { background: var(--surface-2); } }
+  .tile-label { font-size: 14px; color: var(--muted); }
+  .tile-num { font-size: 24px; font-weight: 600; line-height: 1.2; }
+
+  /* 카드 공통 */
+  .card { border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); box-shadow: var(--shadow); padding: 16px; }
+  .card > h2, .card-head h2 { font-size: 16px; }
+  .card > h2 { margin-bottom: 8px; }
+  .card-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .link { min-height: 44px; display: inline-flex; align-items: center; color: var(--muted); font-size: 14px; text-decoration: none; }
+  @media (hover: hover) { .link:hover { color: var(--text); } }
+
+  /* 함께할 친구(캐릭터 고르기 카드 줄, 옆으로 넘김) */
+  .pals { display: flex; gap: 16px; overflow-x: auto; scroll-snap-type: x mandatory; padding: 8px 2px 4px; margin: 0 -2px; }
+  .pal { --pal: #f5a524; flex: 0 0 168px; scroll-snap-align: start; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-2); text-align: center; }
+  @supports (color: color-mix(in srgb, red 50%, white)) { .pal { background: linear-gradient(180deg, color-mix(in srgb, var(--pal) 22%, var(--surface)), var(--surface) 72%); } }
+  .pal[aria-current="true"] { border: 2px solid var(--accent); padding: 15px; }
+  .pal-face { width: 88px; height: 88px; }
+  .pal-face svg, .pal-face img { width: 100%; height: 100%; object-fit: contain; }
+  .pal-name { font-weight: 600; overflow-wrap: anywhere; }
+  .pal-desc { font-size: 12px; line-height: 1.4; color: var(--muted); min-height: 34px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .pal .btn, .pal .now { width: 100%; }
+  .now { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; border-radius: 999px; background: var(--accent-soft); color: var(--accent); font-size: 14px; font-weight: 600; }
+
+  .head-acts { display: flex; align-items: center; gap: 8px; }
+  /* 친구 고르기 창(치이카와·산리오): 휴대폰에서는 아래에서 올라오는 판, 넓은 화면에서는 가운데 창 */
+  dialog#picker { width: min(640px, 100vw); max-width: 100vw; max-height: 88vh; margin: auto auto 0; padding: 0; border: 1px solid var(--line); border-radius: 28px 28px 0 0; background: var(--surface); color: var(--text); box-shadow: 0 -4px 24px rgba(0, 0, 0, .07); }
+  dialog#picker::backdrop { background: rgba(20, 12, 4, .4); }
+  @media (min-width: 768px) { dialog#picker { margin: auto; border-radius: 28px; } }
+  .picker-head { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 16px 8px 24px; background: var(--surface); }
+  .picker-head h2 { font-size: 18px; }
+  .picker-body { padding: 0 24px 24px; }
+  .picker-note { margin: 0 0 16px; font-size: 14px; color: var(--muted); }
+  .picker-body h3 { margin: 16px 0 8px; font-size: 14px; font-weight: 600; color: var(--muted); }
+  .picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(136px, 1fr)); gap: 16px; }
+  .pick { --pal: #f5a524; display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 16px 8px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface-2); text-align: center; }
+  @supports (color: color-mix(in srgb, red 50%, white)) { .pick { background: linear-gradient(180deg, color-mix(in srgb, var(--pal) 24%, var(--surface)), var(--surface) 75%); } }
+  .pick[aria-current="true"] { border: 2px solid var(--accent); padding: 15px 7px; }
+  .pick .pal-face { width: 72px; height: 72px; }
+  .pick .btn, .pick .now { width: 100%; }
+
+  /* 알아볼 사람(얼굴 등록) */
+  .card-note { margin: 4px 0 8px; font-size: 14px; color: var(--muted); }
+  .face-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+  .face-list li { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 8px 8px 16px; border: 1px solid var(--line); border-radius: var(--r-ctl); }
+  .face-list .who-name { font-weight: 500; }
+  .face-list .who-meta { font-size: 12px; color: var(--muted); }
+  #face-form { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  #face-form label { display: block; font-weight: 500; margin: 0 0 4px; }
+  #face-name { width: 100%; min-height: 48px; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface); }
+  #face-name[aria-invalid="true"] { border-color: var(--bad); }
+  .check { display: flex !important; align-items: flex-start; gap: 8px; margin-top: 16px !important; font-weight: 400 !important; }
+  .check input { width: 20px; height: 20px; margin-top: 2px; flex: 0 0 20px; }
+  .field-error { min-height: 20px; font-size: 14px; color: var(--bad); }
+  #face-cam { display: block; width: 100%; max-width: 240px; margin: 8px auto; border-radius: var(--r-ctl); background: #000; transform: scaleX(-1); }
+  .row-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 8px; }
+  .brief-text { margin: 8px 0 16px; font-size: 16px; line-height: 1.6; white-space: pre-line; }
+  .brief-text.empty-text { color: var(--muted); font-size: 14px; }
+  .brief-foot { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding-top: 16px; border-top: 1px solid var(--line); }
+  .brief-foot .check { margin-top: 0 !important; }
+  .brief-time { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+  #brief-time { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface); color: var(--text); }
+  .brief-foot .btn { margin-left: auto; }
+  dialog#confirm { width: min(420px, calc(100vw - 32px)); padding: 24px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); color: var(--text); }
+  dialog#confirm::backdrop { background: rgba(20, 12, 4, .4); }
+  dialog#confirm h2 { font-size: 18px; margin-bottom: 8px; }
+  dialog#confirm p { margin: 0 0 24px; color: var(--muted); }
+  .btn-danger { border: 0; background: var(--bad); color: #fff; }
+
+  /* 대화 칸 */
+  #log { display: flex; flex-direction: column; gap: 8px; }
+  .msg { max-width: min(80%, 560px); padding: 8px 16px; border-radius: 20px; white-space: pre-wrap; word-break: break-word; line-height: 1.5; }
+  .msg.me { align-self: flex-end; background: var(--accent); color: var(--accent-text); border-bottom-right-radius: 4px; }
+  .msg.bot { background: var(--surface-2); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .note { align-self: center; color: var(--muted); font-size: 14px; text-align: center; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 8px; }
+  .note button { min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); cursor: pointer; font-size: 14px; }
+  .line { display: flex; align-items: flex-end; gap: 8px; align-self: flex-start; max-width: min(88%, 620px); }
+  .line .msg { max-width: none; }
+  .mini { flex: 0 0 40px; width: 40px; height: 40px; }
+  .mini svg, .mini img { width: 100%; height: 100%; object-fit: contain; }
+  .dots { display: inline-flex; gap: 4px; padding: 8px 0; }
+  .dots i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); animation: dot 1.2s infinite ease-in-out; }
+  .dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+  @keyframes dot { 0%, 80%, 100% { opacity: .3; } 40% { opacity: 1; } }
+  .empty { color: var(--muted); font-size: 14px; padding: 8px 0; }
+
+  /* 단추 */
+  .btn { min-height: 44px; padding: 0 16px; border-radius: 999px; font-weight: 600; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; justify-content: center; text-decoration: none; transition: background-color 150ms ease-out; }
+  .btn-primary { border: 0; background: var(--accent); color: var(--accent-text); }
+  .btn-secondary { border: 1px solid var(--line); background: var(--surface); color: var(--text); }
+  @media (hover: hover) { .btn-secondary:hover { background: var(--surface-2); } }
+
+  /* 아래 입력 막대: 보이는 이름표 + 둥근 알약(말하기 · 입력 · 멈추기 · 보내기) */
+  .composer { background: var(--canvas); padding: 8px 16px calc(16px + env(safe-area-inset-bottom)); }
+  .composer-in { max-width: 720px; margin: 0 auto; }
+  .composer label { display: block; font-size: 12px; color: var(--muted); line-height: 1.4; margin: 0 0 4px 16px; }
+  .pill { display: flex; align-items: flex-end; gap: 4px; padding: 4px; border: 1px solid var(--line); border-radius: 28px; background: var(--surface); box-shadow: var(--shadow-up); }
+  .pill:focus-within { border-color: var(--accent); }
+  #q { flex: 1; min-width: 0; min-height: 48px; max-height: 144px; padding: 12px 8px 12px 12px; border: 0; background: transparent; resize: none; line-height: 1.5; }
+  #q:focus-visible { outline: none; }
+  .round { width: 48px; height: 48px; flex: 0 0 48px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 50%; cursor: pointer; transition: background-color 150ms ease-out; }
+  .round svg { width: 22px; height: 22px; }
+  #mic { background: var(--accent-soft); color: var(--accent); }
+  #mic[aria-pressed="true"] { background: var(--bad); color: #fff; }
+  #stop { background: transparent; color: var(--muted); }
+  @media (hover: hover) { #stop:hover { background: var(--surface-2); } }
+  #send { background: var(--accent); color: var(--accent-text); }
+  .composer-status { min-height: 16px; font-size: 12px; color: var(--muted); line-height: 1.4; margin: 4px 0 0 16px; }
+
+  /* 장치 점검 */
+  #check { padding-top: 16px; }
+  .check-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+  .check-head p { color: var(--muted); font-size: 14px; margin: 4px 0 0; max-width: 65ch; }
+  #checks { display: flex; flex-direction: column; gap: 8px; margin-top: 16px; }
+  .row { display: grid; grid-template-columns: 24px 1fr auto; gap: 16px; align-items: center; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-ctl); background: var(--surface); }
+  .row .mark { font-size: 16px; font-weight: 600; text-align: center; }
+  .row .name { font-weight: 500; }
   .row .detail { color: var(--muted); font-size: 14px; }
-  .row button { min-height: 44px; padding: 0 14px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: var(--text); font: inherit; font-size: 15px; cursor: pointer; }
+  .row button { min-height: 44px; padding: 0 16px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); cursor: pointer; font-size: 14px; }
   .ok .mark { color: var(--ok); } .warn .mark { color: var(--warn); } .bad .mark { color: var(--bad); }
-  #meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 6px; }
+  #meter { height: 8px; border-radius: 4px; background: var(--line); overflow: hidden; margin-top: 8px; }
   #meter i { display: block; height: 100%; width: 0; background: var(--ok); }
   #cam { width: 100%; max-width: 360px; border-radius: 12px; background: #000; margin-top: 8px; display: none; }
-  #touchpad { margin-top: 6px; padding: 18px; border: 2px dashed var(--line); border-radius: 12px; text-align: center; color: var(--muted); user-select: none; touch-action: manipulation; }
-  [hidden] { display: none !important; }
-  @media (max-width: 520px) { #face { width: 128px; height: 128px; } .msg { max-width: 88%; } }
+  #touchpad { margin-top: 8px; padding: 16px; border: 1px dashed var(--line); border-radius: 12px; text-align: center; color: var(--muted); user-select: none; touch-action: manipulation; }
+
+  /* 쉬는 화면: 손 안 댄 지 3분이면 어둡게 덮고 시계만 30초마다 바꾼다(캐릭터 움직임·상태 묻기 멈춤) */
+  .sleep { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; background: #0f0c0a; color: #b8ada1; text-align: center; opacity: 0; pointer-events: none; transition: opacity 300ms ease-out; cursor: pointer; }
+  body.asleep .sleep { opacity: 1; pointer-events: auto; }
+  body.asleep #face, body.asleep .dots i { animation: none !important; }
+  .sleep-time { font-size: 48px; font-weight: 500; line-height: 1.1; color: #f3ede6; font-variant-numeric: tabular-nums; }
+  .sleep p { margin: 0; max-width: 32ch; font-size: 14px; line-height: 1.5; }
+
+  /* 넓은 화면: 무대를 둥근 카드로, 위 막대는 바탕색 */
+  @media (min-width: 768px) {
+    .bar { background: var(--canvas); padding: 8px 24px; }
+    .page { padding-top: 8px; }
+    .hero { margin: 0; border-radius: 32px; padding: 24px 32px 32px; }
+    .hero-name { font-size: 32px; }
+    #face { width: 260px; height: 260px; }
+    .ground { width: 200px; }
+  }
+  @media (max-width: 520px) {
+    .scene { min-height: 264px; }
+    #face { width: 200px; height: 200px; }
+    .ground { width: 152px; }
+    .row { grid-template-columns: 24px 1fr; }
+    .row .act { grid-column: 2; }
+    .check-head { flex-direction: column; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #face, .dots i { animation: none !important; }
+    .say, .tip, .icon, .tile, .btn, .round { transition: opacity 150ms linear !important; transform: none !important; }
+  }
 </style>
 </head>
 <body>
-<header>
-  <h1 id="title">JARVIS</h1>
-  <button id="tab-check" type="button" aria-pressed="false">장치 점검</button>
-  <a href="/" id="to-settings">설정 모드</a>
+<header class="bar">
+  <div class="who"><h1 id="title">JARVIS</h1></div>
+  <span class="tipwrap"><button id="voice" class="icon" type="button" aria-pressed="true" aria-label="소리 끄기" aria-describedby="tip-voice" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9v6h4l5 4V5L8 9H4z"/><path class="wave" d="M16.5 8.5a5 5 0 0 1 0 7M19 6a8.5 8.5 0 0 1 0 12"/></svg></button><span class="tip" role="tooltip" id="tip-voice">소리 끄기</span></span>
+  <span class="tipwrap" id="ambient-wrap" hidden><button id="ambient" class="icon" type="button" aria-pressed="false" aria-label="부르면 대답하기 켜기" aria-describedby="tip-ambient"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 9a5 5 0 0 1 10 0c0 3-2.5 3.5-3 6a3 3 0 0 1-5.5 1.5"/><path d="M10 9.5a2 2 0 0 1 4 0"/></svg></button><span class="tip" role="tooltip" id="tip-ambient">부르면 대답하기 켜기</span></span>
+  <span class="tipwrap" id="presence-wrap" hidden><button id="presence" class="icon" type="button" aria-pressed="false" aria-label="카메라로 깨우기 켜기" aria-describedby="tip-presence"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg></button><span class="tip" role="tooltip" id="tip-presence">카메라로 깨우기 켜기</span></span>
+  <span class="tipwrap"><button id="tab-check" class="icon" type="button" aria-pressed="false" aria-label="장치 점검 열기" aria-describedby="tip-check"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="3"/><path d="M9 12l2 2 4-4"/></svg></button><span class="tip" role="tooltip" id="tip-check">장치 점검 열기</span></span>
+  <span class="tipwrap"><a id="to-settings" class="icon" href="/" aria-label="설정 열기" aria-describedby="tip-settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg></a><span class="tip" role="tooltip" id="tip-settings">설정 열기</span></span>
 </header>
 <main>
-  <section id="talk" aria-label="대화">
-    <div id="stage">
-      <div id="face" role="img" aria-label="캐릭터 얼굴"></div>
-      <div id="state" role="status" aria-live="polite">준비 중…</div>
-    </div>
-    <div id="log" aria-live="polite"></div>
-    <form id="bar" autocomplete="off">
-      <textarea id="q" rows="1" placeholder="무엇이든 물어보세요" aria-label="질문"></textarea>
-      <button id="mic" type="button" aria-pressed="false" aria-label="말하기" hidden>🎤</button>
-      <button id="stop" type="button" aria-label="답 멈추기">멈추기</button>
-      <button id="send" type="submit">보내기</button>
-    </form>
-  </section>
-  <section id="check" aria-label="장치 점검" hidden>
-    <h2>장치 점검</h2>
-    <p class="lead">이 화면을 연 기기(토스 기기·휴대폰·PC)가 JARVIS에 필요한 장치를 쓸 수 있는지 확인합니다. 시험 녹음·영상은 저장하거나 보내지 않습니다.</p>
-    <div id="checks"></div>
-  </section>
+  <div class="page" id="talk">
+    <section class="hero" aria-labelledby="hero-name">
+      <p class="hello" id="hello">반가워요</p>
+      <h2 class="hero-name" id="hero-name">JARVIS</h2>
+      <div class="stat">오늘 나눈 대화 <b id="talk-count">0</b>번</div>
+      <div class="scene">
+        <div class="say out" id="say" aria-hidden="true"></div>
+        <div id="face" role="img" aria-label="캐릭터 얼굴"></div>
+        <div class="ground" aria-hidden="true"></div>
+      </div>
+      <div class="state" id="state" role="status" aria-live="polite"><i aria-hidden="true"></i><span>준비 중…</span></div>
+    </section>
+    <nav class="tiles" aria-label="요약">
+      <a class="tile" href="/#missions"><span class="tile-label">승인 기다리는 일 ›</span><span class="tile-num" id="n-missions">–</span></a>
+      <a class="tile" href="/#meetings"><span class="tile-label">저장된 회의 ›</span><span class="tile-num" id="n-meetings">–</span></a>
+    </nav>
+    <section class="card" id="brief-card" aria-labelledby="brief-h">
+      <div class="card-head"><h2 id="brief-h">오늘 브리핑</h2><button type="button" class="btn btn-secondary" id="brief-play">듣기</button></div>
+      <p class="brief-text" id="brief-text" aria-live="polite"></p>
+      <div class="brief-foot">
+        <label class="check"><input type="checkbox" id="brief-on"> 매일 미리 만들기</label>
+        <span class="brief-time"><label for="brief-time">시각</label><input type="time" id="brief-time" value="06:00"></span>
+        <button type="button" class="btn btn-secondary" id="brief-make">지금 만들기</button>
+      </div>
+      <p class="card-note" id="brief-note"></p>
+    </section>
+    <section class="card" aria-labelledby="pals-h">
+      <div class="card-head"><h2 id="pals-h">함께할 친구</h2><div class="head-acts"><a class="link" href="/#characters">친구 관리 ›</a><button type="button" class="btn btn-secondary" id="open-picker">친구 고르기</button></div></div>
+      <div class="pals" id="pals" role="list"></div>
+    </section>
+    <section class="card" id="faces-card" aria-labelledby="faces-h" hidden>
+      <div class="card-head"><h2 id="faces-h">알아볼 사람</h2><button type="button" class="btn btn-secondary" id="face-add">사람 등록하기</button></div>
+      <p class="card-note">근접 센서나 카메라로 깨어날 때 등록한 얼굴이면 이름을 불러 줘요. 사진은 저장하지 않고, 얼굴 특징 숫자만 이 기기 브라우저에만 저장해요. 본인이 동의한 사람만 등록하세요.</p>
+      <ul class="face-list" id="face-list"></ul>
+      <form id="face-form" novalidate hidden>
+        <label for="face-name">이름</label>
+        <input id="face-name" maxlength="20" autocomplete="off" aria-describedby="face-name-err">
+        <div class="field-error" id="face-name-err"></div>
+        <label class="check"><input type="checkbox" id="face-consent" aria-describedby="face-consent-err"> 이 사람이 얼굴 등록에 동의했어요</label>
+        <div class="field-error" id="face-consent-err"></div>
+        <video id="face-cam" muted playsinline hidden></video>
+        <div class="row-acts"><button type="button" class="btn btn-secondary" id="face-cancel">취소</button><button type="submit" class="btn btn-primary" id="face-shoot">얼굴 찍기</button></div>
+        <div class="composer-status" id="face-status" role="status" aria-live="polite"></div>
+      </form>
+    </section>
+    <section class="card" aria-labelledby="chat-h">
+      <h2 id="chat-h">대화</h2>
+      <div id="log" aria-live="polite"></div>
+    </section>
+  </div>
+  <div class="page" id="check" hidden>
+    <section class="card" aria-labelledby="check-h">
+      <div class="check-head">
+        <div><h2 id="check-h">장치 점검</h2><p>이 화면을 연 기기(토스 기기·휴대폰·PC)가 JARVIS에 필요한 장치를 쓸 수 있는지 확인합니다. 시험 녹음·영상은 저장하거나 보내지 않습니다.</p></div>
+        <button type="button" class="btn btn-secondary" id="back-talk">대화로 돌아가기</button>
+      </div>
+      <div id="checks"></div>
+    </section>
+  </div>
 </main>
+<form id="bar" class="composer" autocomplete="off">
+  <div class="composer-in">
+    <label for="q" id="q-label">JARVIS에게 말하기</label>
+    <div class="pill">
+      <span class="tipwrap" id="mic-wrap" hidden><button id="mic" class="round" type="button" aria-pressed="false" aria-label="말하기" aria-describedby="tip-mic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button><span class="tip" role="tooltip" id="tip-mic">말하기</span></span>
+      <textarea id="q" rows="1" placeholder="예: 오늘 할 일은?"></textarea>
+      <span class="tipwrap"><button id="stop" class="round" type="button" aria-label="멈추기" aria-describedby="tip-stop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><rect x="6.5" y="6.5" width="11" height="11" rx="2.5"/></svg></button><span class="tip" role="tooltip" id="tip-stop">멈추기</span></span>
+      <span class="tipwrap"><button id="send" class="round" type="submit" aria-label="보내기" aria-describedby="tip-send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg></button><span class="tip" role="tooltip" id="tip-send">보내기</span></span>
+    </div>
+    <div class="composer-status" id="composer-status" role="status" aria-live="polite"></div>
+  </div>
+</form>
+<div class="sleep" id="sleep" aria-hidden="true" role="button" tabindex="-1" aria-label="화면 깨우기">
+  <div class="sleep-time" id="sleep-time"></div>
+  <p id="sleep-hint">화면을 누르면 깨어나요.</p>
+</div>
+<dialog id="confirm" aria-labelledby="confirm-h" aria-describedby="confirm-body">
+  <h2 id="confirm-h"></h2>
+  <p id="confirm-body"></p>
+  <div class="row-acts"><button type="button" class="btn btn-secondary" id="confirm-cancel">취소</button><button type="button" class="btn btn-danger" id="confirm-ok"></button></div>
+</dialog>
+<dialog id="picker" aria-labelledby="picker-h">
+  <div class="picker-head"><h2 id="picker-h">친구 고르기</h2><button type="button" class="btn btn-secondary" id="close-picker">닫기</button></div>
+  <div class="picker-body">
+    <p class="picker-note">고른 친구의 이름과 말투로 대답해요. 오리지널 친구(자비와 동물 친구들)는 그림이 함께 들어 있어 바로 움직여요. 치이카와·산리오 친구는 이름과 말투만 있어 도형 얼굴로 시작하고, 설정 → 캐릭터 → "그림 얼굴"에 쓸 권리가 있는 그림을 넣으면 그 그림이 움직여요.</p>
+    <div id="picks"></div>
+  </div>
+</dialog>
 <script type="module">
 import * as A from '/static/avatar.js';
 import * as V from '/static/voice-input.js';
+import * as P from '/static/presence.js';
+import * as F from '/static/faces.js';
 
 const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
 const $ = (s) => document.querySelector(s);
 const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
-const STATE_TEXT = { idle: '대기', listening: '듣는 중', thinking: '생각 중', speaking: '말하는 중' };
+const asleep = () => document.body.classList.contains('asleep');
+const STATE_TEXT = { idle: '대기 중', listening: '듣는 중', thinking: '생각하는 중', speaking: '말하는 중' };
+const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch { /* 저장 못 해도 화면은 동작 */ } } };
 
 async function api(method, path, body) {
   const res = await fetch(path, { method, headers: { 'x-jarvis-token': TOKEN, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
@@ -96,10 +362,24 @@ async function api(method, path, body) {
   if (!res.ok) throw new Error(data.error?.message ?? '오류');
   return data;
 }
+function status(text) { $('#composer-status').textContent = text; }
 
 // ---------- 얼굴·상태 ----------
 // /api/voice 응답은 보낸 순서대로 오지 않을 수 있다. 가장 늦게 보낸 요청의 응답만 반영한다.
-const face = { look: null, name: '', voiceState: 'idle', chatPending: false, recording: false };
+// deviceSpeaking: 이 기기 음성으로 답을 읽는 중(말하는 얼굴로 바뀜).
+const face = { id: null, look: null, name: '', images: [], voiceState: 'idle', chatPending: false, recording: false, deviceSpeaking: false };
+// 기기가 말하기 시작·끝을 "부르면 대답하기"에 알린다(에코 판단·답 직후 이어 말하기용). 읽는 글은 lastWords.
+const ambientState = { on: false, lastWords: '' };
+let speakingFlag = false;
+Object.defineProperty(face, 'deviceSpeaking', {
+  get: () => speakingFlag,
+  set: (v) => {
+    v = Boolean(v);
+    if (v === speakingFlag) return;
+    speakingFlag = v;
+    if (ambientState.on) api('POST', '/api/ambient/spoken', v ? { state: 'start', text: ambientState.lastWords } : { state: 'end' }).catch(() => {});
+  },
+});
 let voiceAsked = 0;
 let voiceApplied = 0;
 async function refreshVoice() {
@@ -108,25 +388,356 @@ async function refreshVoice() {
     const v = await api('GET', '/api/voice');
     if (n < voiceApplied) return;
     voiceApplied = n;
+    face.id = v.character?.id ?? null;
     face.look = v.character?.look ?? null;
     face.name = v.character?.name ?? '';
+    face.images = v.character?.images ?? [];
     face.voiceState = v.state;
-    $('#title').textContent = face.name ? `JARVIS · ${face.name}` : 'JARVIS';
+    const who = face.name || 'JARVIS';
+    if ($('#hero-name').textContent !== who) { $('#hero-name').textContent = who; $('#q-label').textContent = `${who}에게 말하기`; document.title = `${who} · JARVIS`; }
+    // 무대 색: 적용한 캐릭터의 얼굴 색을 옅게 섞는다
+    document.documentElement.style.setProperty('--char', A.normalizeLook(face.look).color);
+    loadImages();
+    if (face.id !== palsFor) renderPals(); // 다른 화면에서 캐릭터를 바꿨으면 친구 줄도 다시 그림
   } catch { /* 다음 주기에 다시 묻는다 */ }
 }
-function currentState() { return A.avatarState({ voiceState: face.voiceState, recording: face.recording, chatPending: face.chatPending }); }
+
+// 그림 얼굴: 토큰을 붙여 받아 브라우저 안(blob)에서만 보여 준다. 그림이 바뀌면(v) 다시 받는다.
+const imgUrl = new Map(); // `${캐릭터}:${상태}:${v}` → blob 주소
+async function loadImages() {
+  const want = new Set(face.images.map((x) => `${face.id}:${x.state}:${x.v}`));
+  for (const [key, url] of imgUrl) if (!want.has(key)) { if (url) URL.revokeObjectURL(url); imgUrl.delete(key); }
+  for (const x of face.images) {
+    const key = `${face.id}:${x.state}:${x.v}`;
+    if (imgUrl.has(key)) continue;
+    imgUrl.set(key, null); // 받는 중
+    try {
+      const res = await fetch(`/api/characters/${face.id}/image?state=${x.state}`, { headers: { 'x-jarvis-token': TOKEN } });
+      if (res.ok) imgUrl.set(key, URL.createObjectURL(await res.blob())); else imgUrl.delete(key);
+    } catch { imgUrl.delete(key); }
+  }
+}
+function imageFor(state) {
+  const url = (s) => { const x = face.images.find((i) => i.state === s); return x ? imgUrl.get(`${face.id}:${s}:${x.v}`) ?? null : null; };
+  if (state === 'speaking') {
+    // 말하는 중: 1·2를 일정한 박자로 번갈아(입이 열렸다 닫혔다). 움직임 줄이기면 1만.
+    const open = A.mouthAt('speaking', performance.now(), { reducedMotion }) !== 'closed';
+    return (open ? url('speaking') : url('speaking2') ?? url('speaking')) ?? url('speaking') ?? url('idle');
+  }
+  return url(state) ?? url('idle');
+}
+function currentState() {
+  return face.deviceSpeaking ? 'speaking' : A.avatarState({ voiceState: face.voiceState, recording: face.recording, chatPending: face.chatPending });
+}
 function drawFace() {
   const state = currentState();
-  const html = A.renderAvatar(face.look, state, { mouth: A.mouthAt(state, performance.now(), { reducedMotion }), size: 168, name: face.name || 'JARVIS' });
   const box = $('#face');
-  if (box.dataset.drawn !== html) { box.innerHTML = html; box.dataset.drawn = html; }
-  const text = `${face.name ? `${face.name} · ` : ''}${STATE_TEXT[state] ?? state}`;
-  if ($('#state').textContent !== text) $('#state').textContent = text;
+  const src = imageFor(state);
+  if (src) {
+    let img = box.querySelector('img');
+    if (!img) { img = document.createElement('img'); img.alt = ''; box.replaceChildren(img); box.dataset.drawn = ''; }
+    if (img.getAttribute('src') !== src) img.src = src;
+  } else {
+    const html = A.renderAvatar(face.look, state, { mouth: A.mouthAt(state, performance.now(), { reducedMotion }), size: 208, name: face.name || 'JARVIS' });
+    if (box.dataset.drawn !== html) { box.innerHTML = html; box.dataset.drawn = html; }
+  }
+  box.setAttribute('aria-label', `${face.name || 'JARVIS'} 얼굴, ${STATE_TEXT[state] ?? state}`);
+  if (box.dataset.state !== state) box.dataset.state = state;
+  const st = $('#state');
+  const text = `${face.name || 'JARVIS'} · ${STATE_TEXT[state] ?? state}`;
+  if (st.lastChild.textContent !== text) { st.lastChild.textContent = text; st.dataset.state = state; }
 }
-setInterval(drawFace, 120);
+// 말풍선 옆 작은 얼굴(대기 모습)
+function miniFace() {
+  const box = document.createElement('div');
+  box.className = 'mini';
+  box.setAttribute('aria-hidden', 'true');
+  const src = imageFor('idle');
+  if (src) { const img = document.createElement('img'); img.src = src; img.alt = ''; box.append(img); }
+  else box.innerHTML = A.renderAvatar(face.look, 'idle', { size: 40, name: face.name || 'JARVIS' });
+  return box;
+}
+// 캐릭터 머리 위 말풍선(가장 최근 한마디)
+function say(text) {
+  const el = $('#say');
+  if (!text) { el.classList.add('out'); return; }
+  el.textContent = text.length > 80 ? `${text.slice(0, 78)}…` : text;
+  el.classList.remove('out');
+}
+
+// ---------- 함께할 친구(캐릭터 고르기) ----------
+// 카드를 누르면 그 캐릭터를 적용한다(설정 모드의 "이 캐릭터 적용"과 같은 API). 대기 그림이 있으면 그 그림을 보인다.
+let palsFor; // 친구 줄을 그린 때의 적용 캐릭터
+let palsTicket = 0;
+const palImg = new Map(); // `${캐릭터}:${v}` → blob 주소
+async function palFace(c) {
+  const box = document.createElement('div');
+  box.className = 'pal-face';
+  box.setAttribute('aria-hidden', 'true');
+  const idle = (c.images ?? []).find((x) => x.state === 'idle');
+  if (idle) {
+    const key = `${c.id}:${idle.v}`;
+    if (!palImg.has(key)) {
+      try {
+        const res = await fetch(`/api/characters/${c.id}/image?state=idle`, { headers: { 'x-jarvis-token': TOKEN } });
+        if (res.ok) palImg.set(key, URL.createObjectURL(await res.blob()));
+      } catch { /* 그림을 못 받으면 도형 얼굴 */ }
+    }
+    if (palImg.has(key)) { const img = document.createElement('img'); img.src = palImg.get(key); img.alt = ''; box.append(img); return box; }
+  }
+  box.innerHTML = A.renderAvatar(c.look, 'idle', { size: 88, name: c.name });
+  return box;
+}
+async function renderPals() {
+  const n = (palsTicket += 1);
+  palsFor = face.id;
+  let list;
+  try { list = await api('GET', '/api/characters'); } catch { return; }
+  const cards = [];
+  for (const c of list) {
+    const card = document.createElement('div');
+    card.className = 'pal';
+    card.setAttribute('role', 'listitem');
+    card.style.setProperty('--pal', A.normalizeLook(c.look).color);
+    if (c.active) card.setAttribute('aria-current', 'true');
+    const name = document.createElement('div'); name.className = 'pal-name'; name.textContent = c.name;
+    const desc = document.createElement('div'); desc.className = 'pal-desc'; desc.textContent = c.persona;
+    let act;
+    if (c.active) { act = document.createElement('span'); act.className = 'now'; act.textContent = '지금 대화 중'; }
+    else {
+      act = document.createElement('button'); act.type = 'button'; act.className = 'btn btn-secondary'; act.textContent = '같이 대화하기';
+      act.setAttribute('aria-label', `${c.name}: 같이 대화하기`);
+      act.addEventListener('click', () => choosePal(c));
+    }
+    card.append(await palFace(c), name, desc, act);
+    cards.push(card);
+  }
+  if (n !== palsTicket) return; // 늦게 온 옛 목록은 버린다
+  if (!cards.length) {
+    const empty = document.createElement('div');
+    empty.className = 'empty';
+    empty.append('아직 함께할 친구가 없어요. 이름과 말투를 정하면 그 캐릭터처럼 대답해요. ');
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'btn btn-primary'; b.textContent = '친구 고르기';
+    b.addEventListener('click', openPicker);
+    empty.append(b);
+    cards.push(empty);
+  }
+  $('#pals').replaceChildren(...cards);
+}
+async function choosePal(c) {
+  if (face.chatPending) { status('답을 다 들은 뒤에 친구를 바꿀 수 있어요.'); return; }
+  stopSpeaking();
+  try {
+    await api('POST', `/api/characters/${c.id}/activate`);
+    nextPoll = 0;
+    await refreshVoice();
+    await renderPals();
+    say('');
+    status(`이제 ${c.name} 차례예요.`);
+  } catch (e) { note('친구를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.', String(e.message)); }
+}
+
+// ---------- 친구 고르기 창(치이카와·산리오 목록) ----------
+// 같은 이름의 캐릭터가 이미 있으면 새로 만들지 않고 그 캐릭터를 적용한다(서버 adoptPreset).
+async function renderPicks() {
+  let list;
+  try { list = await api('GET', '/api/character-presets'); }
+  catch (e) { $('#picks').replaceChildren(); note('친구 목록을 불러오지 못했어요. 잠시 뒤 다시 열어 주세요.', String(e.message)); return; }
+  const groups = [];
+  for (const g of [...new Set(list.map((p) => p.group))]) {
+    const h = document.createElement('h3'); h.textContent = `${g} 친구들`;
+    const grid = document.createElement('div'); grid.className = 'picks'; grid.setAttribute('role', 'list');
+    for (const p of list.filter((x) => x.group === g)) {
+      const card = document.createElement('div');
+      card.className = 'pick'; card.setAttribute('role', 'listitem');
+      card.style.setProperty('--pal', p.look.color);
+      if (p.active) card.setAttribute('aria-current', 'true');
+      const faceBox = document.createElement('div'); faceBox.className = 'pal-face'; faceBox.setAttribute('aria-hidden', 'true');
+      if (p.mascot) { const img = document.createElement('img'); img.src = `/static/mascot/${p.key}/idle.png`; img.alt = ''; img.width = 72; img.height = 72; faceBox.append(img); }
+      else faceBox.innerHTML = A.renderAvatar(p.look, 'idle', { size: 72, name: p.name });
+      const name = document.createElement('div'); name.className = 'pal-name'; name.textContent = p.name;
+      const desc = document.createElement('div'); desc.className = 'pal-desc'; desc.textContent = p.blurb;
+      let act;
+      if (p.active) { act = document.createElement('span'); act.className = 'now'; act.textContent = '지금 대화 중'; }
+      else {
+        act = document.createElement('button'); act.type = 'button'; act.className = 'btn btn-secondary';
+        act.textContent = p.have ? '다시 대화하기' : '고르기';
+        act.setAttribute('aria-label', `${p.name} ${p.have ? '다시 대화하기' : '고르기'}`);
+        act.addEventListener('click', () => adopt(p));
+      }
+      card.append(faceBox, name, desc, act);
+      grid.append(card);
+    }
+    groups.push(h, grid);
+  }
+  $('#picks').replaceChildren(...groups);
+}
+async function adopt(p) {
+  if (face.chatPending) { status('답을 다 들은 뒤에 친구를 바꿀 수 있어요.'); return; }
+  stopSpeaking();
+  try {
+    await api('POST', `/api/character-presets/${p.key}/adopt`);
+    $('#picker').close();
+    nextPoll = 0;
+    await refreshVoice();
+    await renderPals();
+    say('');
+    status(`이제 ${p.name} 차례예요.`);
+  } catch (e) { note('친구를 고르지 못했어요. 잠시 뒤 다시 눌러 주세요.', String(e.message)); }
+}
+async function openPicker() {
+  await renderPicks();
+  $('#picker').showModal();
+  $('#close-picker').focus();
+}
+$('#open-picker').addEventListener('click', openPicker);
+$('#close-picker').addEventListener('click', () => $('#picker').close());
+$('#picker').addEventListener('close', () => $('#open-picker').focus());
+
+// ---------- 인사말(시간에 따라) ----------
+function showHello() {
+  const h = new Date().getHours();
+  $('#hello').textContent = h >= 5 && h < 11 ? '좋은 아침이에요' : h >= 11 && h < 17 ? '좋은 오후예요' : h >= 17 && h < 22 ? '좋은 저녁이에요' : '늦은 밤이에요';
+}
+
+// ---------- 오늘 나눈 대화 수(이 기기에만 기록) ----------
+const todayKey = () => `jarvis.talks.${new Date().toLocaleDateString('sv-SE')}`;
+function showTalkCount() { $('#talk-count').textContent = String(Number(store.get(todayKey()) ?? 0)); }
+function countTalk() { store.set(todayKey(), String(Number(store.get(todayKey()) ?? 0) + 1)); showTalkCount(); }
+
+// ---------- 요약 타일(읽기 전용) ----------
+async function refreshTiles() {
+  try { $('#n-missions').textContent = String((await api('GET', '/api/missions?status=pending')).length); } catch { $('#n-missions').textContent = '–'; }
+  try { $('#n-meetings').textContent = String((await api('GET', '/api/meetings')).length); } catch { $('#n-meetings').textContent = '–'; }
+  loadBriefing();
+}
+
+// ---------- 오늘 브리핑(PC가 정한 시각에 미리 써 둔 글을 이 기기 음성으로 읽기, 아이디어 출처: OpenJarvis) ----------
+const brief = { text: '', day: '', busy: false };
+async function loadBriefing() {
+  let s;
+  try { s = await api('GET', '/api/briefing'); } catch { return; }
+  brief.text = s.today?.text ?? '';
+  brief.day = s.today?.day ?? '';
+  const el = $('#brief-text');
+  el.textContent = brief.text || '아직 오늘 브리핑이 없어요. "지금 만들기"를 누르거나 정한 시각까지 기다려 주세요.';
+  el.classList.toggle('empty-text', !brief.text);
+  $('#brief-play').disabled = !brief.text;
+  $('#brief-on').checked = s.enabled;
+  if (document.activeElement !== $('#brief-time')) $('#brief-time').value = s.time;
+  $('#brief-time').disabled = !s.enabled;
+  $('#brief-note').textContent = !s.provider ? '이 PC에 대화 모델(Ollama)이 없어 브리핑을 만들 수 없어요.'
+    : s.generating ? '브리핑을 쓰는 중이에요…'
+      : `승인 기다리는 일과 어제·오늘 회의를 모아 이 PC 안에서만 써요.${s.today ? ` ${new Date(s.today.created_at).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })}에 만들었어요.` : ''}`;
+}
+$('#brief-play').addEventListener('click', () => {
+  if (!brief.text) return;
+  unlockSpeech();
+  say(brief.text);
+  speak(brief.text);
+  store.set('jarvis.briefHeard', brief.day);
+});
+$('#brief-make').addEventListener('click', async () => {
+  if (brief.busy) return;
+  brief.busy = true;
+  const b = $('#brief-make');
+  b.textContent = '만드는 중…';
+  b.setAttribute('aria-busy', 'true');
+  $('#brief-note').textContent = '브리핑을 쓰는 중이에요. 10초쯤 걸려요.';
+  try {
+    await api('POST', '/api/briefing/generate');
+    status('오늘 브리핑을 새로 만들었어요. "듣기"를 눌러 보세요.');
+  } catch (e) {
+    note('브리핑을 만들지 못했어요. 잠시 뒤 다시 눌러 주세요.', String(e.message));
+  } finally {
+    brief.busy = false;
+    b.textContent = '지금 만들기';
+    b.removeAttribute('aria-busy');
+    loadBriefing();
+  }
+});
+$('#brief-on').addEventListener('change', async (e) => {
+  try { await api('PUT', '/api/briefing/settings', { enabled: e.target.checked }); status(e.target.checked ? `매일 ${$('#brief-time').value}에 브리핑을 미리 만들어요.` : '브리핑을 미리 만들지 않아요.'); } catch (err) { note('설정을 바꾸지 못했어요.', String(err.message)); }
+  loadBriefing();
+});
+$('#brief-time').addEventListener('change', async (e) => {
+  if (!e.target.value) return;
+  try { await api('PUT', '/api/briefing/settings', { time: e.target.value }); status(`매일 ${e.target.value}에 브리핑을 미리 만들어요.`); } catch (err) { note('시각을 바꾸지 못했어요.', String(err.message)); }
+  loadBriefing();
+});
+// 아침에 깨어났을 때 아직 안 들은 오늘 브리핑이 있으면 알려 준다(자동으로 읽지는 않음)
+function briefingHint() {
+  if (brief.text && brief.day && store.get('jarvis.briefHeard') !== brief.day && new Date().getHours() < 12) say('오늘 브리핑이 준비됐어요. "듣기"를 눌러 주세요.');
+}
+
+// ---------- 이 기기 음성으로 답 읽기 ----------
+// 답을 연 기기(휴대폰·토스 기기)의 브라우저 음성으로 그 기기 스피커에서 읽는다. PC 스피커는 쓰지 않는다.
+const synth = window.speechSynthesis ?? null;
+// JARVIS 앱(안드로이드)에서 열면 앱이 기기 음성·근접 센서·밝기를 더해 준다(window.JarvisApp). 브라우저면 없음.
+const app = window.JarvisApp ?? null;
+const appSpeech = () => Boolean(app?.hasSpeech?.());
+let voiceOn = store.get('jarvis.deviceVoice') !== 'off';
+let speechUnlocked = false;
+function showVoiceButton() {
+  const b = $('#voice');
+  b.hidden = !synth && !app;
+  const label = voiceOn ? '소리 끄기' : '소리 켜기';
+  b.setAttribute('aria-label', label);
+  b.setAttribute('aria-pressed', String(voiceOn));
+  $('#tip-voice').textContent = label;
+  b.querySelector('.wave').style.opacity = voiceOn ? '1' : '0';
+}
+// 휴대폰 브라우저는 사용자가 누른 순간에만 소리를 허락하므로, 첫 누름 때 빈 말을 한 번 해 둔다.
+function unlockSpeech() {
+  if (!synth || app || speechUnlocked) return;
+  speechUnlocked = true;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; synth.speak(u); } catch { /* 무시 */ }
+}
+function koreanVoice() {
+  const list = synth?.getVoices() ?? [];
+  return list.find((v) => /^ko/i.test(v.lang) && v.localService) ?? list.find((v) => /^ko/i.test(v.lang)) ?? null;
+}
+// 읽기 좋게: 마크다운 기호·이모지·주소를 빼고 공백을 정리
+function speakable(text) {
+  return text.replace(/https?:\/\/\S+/g, '').replace(/[*_#`~>|\[\]]/g, '').replace(/\p{Extended_Pictographic}/gu, '').replace(/\([^()가-힣a-zA-Z0-9]{1,12}\)/g, '').replace(/\s+/g, ' ').trim(); // 괄호 얼굴 문자 (๑ᴗ<๑) 같은 것은 읽지 않음
+}
+function stopSpeaking() {
+  if (app) app.stopSpeaking();
+  if (synth) synth.cancel();
+  face.deviceSpeaking = false;
+}
+function speak(text) {
+  if (!voiceOn) return;
+  const words = speakable(text);
+  if (!words) return;
+  ambientState.lastWords = words;
+  if (appSpeech()) { app.speak(words, 1.3); return; } // 앱: 기기 음성(TTS). 말 시작·끝은 'jarvis-app' 알림으로 받음
+  if (!synth) return;
+  synth.cancel();
+  const u = new SpeechSynthesisUtterance(words);
+  u.lang = 'ko-KR';
+  const v = koreanVoice();
+  if (v) u.voice = v;
+  u.rate = 1.0;
+  u.pitch = 1.3; // 조금 높고 귀여운 목소리
+  u.onstart = () => { face.deviceSpeaking = true; };
+  u.onend = () => { face.deviceSpeaking = false; };
+  u.onerror = () => { face.deviceSpeaking = false; };
+  synth.speak(u);
+}
+$('#voice').addEventListener('click', () => {
+  voiceOn = !voiceOn;
+  store.set('jarvis.deviceVoice', voiceOn ? 'on' : 'off');
+  if (!voiceOn) stopSpeaking(); else unlockSpeech();
+  showVoiceButton();
+  status(voiceOn ? '이제 답을 이 기기 소리로 읽어 드려요.' : '답을 소리 없이 글로만 보여 드려요.');
+});
+showVoiceButton();
+
+setInterval(() => { if (!document.hidden && !asleep()) drawFace(); }, 120);
 let nextPoll = 0;
 setInterval(() => {
-  if (document.hidden) return;
+  if (document.hidden || asleep()) return;
   const busy = currentState() !== 'idle';
   const now = performance.now();
   if (now >= nextPoll) { nextPoll = now + (busy ? 600 : 3000); refreshVoice(); }
@@ -139,7 +750,25 @@ function add(kind, text) {
   div.className = `msg ${kind}`;
   div.textContent = text;
   $('#log').append(div);
-  $('#log').scrollTop = $('#log').scrollHeight;
+  $('main').scrollTop = $('main').scrollHeight;
+  return div;
+}
+// 알림 한 줄. details가 있으면 "오류 내용 복사" 단추를 붙인다(기술 내용은 화면에 그대로 내보이지 않음).
+function note(text, details) {
+  const div = document.createElement('div');
+  div.className = 'note';
+  const span = document.createElement('span');
+  span.textContent = text;
+  div.append(span);
+  if (details) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.textContent = '오류 내용 복사';
+    b.addEventListener('click', async () => { try { await navigator.clipboard.writeText(details); b.textContent = '복사했어요'; } catch { b.textContent = '복사하지 못했어요'; } });
+    div.append(b);
+  }
+  $('#log').append(div);
+  $('main').scrollTop = $('main').scrollHeight;
   return div;
 }
 async function pickProvider() {
@@ -147,37 +776,72 @@ async function pickProvider() {
   // 이 기기 안 공급자만 쓴다(자비스 모드에서는 외부로 보내지 않음). Ollama가 있으면 Ollama.
   provider = (list.find((p) => p.name === 'ollama' && !p.remote) ?? list.find((p) => !p.remote))?.name ?? null;
 }
-async function ask(question) {
+// 캐릭터 답 한 줄(작은 얼굴 + 말풍선). 처음에는 "입력 중" 점 세 개를 보인다.
+function addBotLine() {
+  const line = document.createElement('div');
+  line.className = 'line';
+  const bubble = document.createElement('div');
+  bubble.className = 'msg bot';
+  bubble.innerHTML = '<span class="dots" role="img" aria-label="답을 만드는 중"><i></i><i></i><i></i></span>';
+  line.append(miniFace(), bubble);
+  $('#log').append(line);
+  $('main').scrollTop = $('main').scrollHeight;
+  return { line, bubble };
+}
+// 답을 한 글자씩 보여 준다(움직임 줄이기면 한 번에). 최대 약 2.5초.
+async function typeOut(el, text) {
+  if (reducedMotion || text.length < 2) { el.textContent = text; return; }
+  const step = Math.max(1, Math.ceil(text.length / 120));
+  for (let i = step; i < text.length; i += step) {
+    el.textContent = text.slice(0, i);
+    $('main').scrollTop = $('main').scrollHeight;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  el.textContent = text;
+}
+// ambient: "부르면 대답하기"로 들은 질문이면 방금 방 안 대화를 참고 자료로 함께 쓴다(서버가 이 기기 안 모델에만 넣음).
+async function ask(question, { ambient = false } = {}) {
   question = question.trim();
-  if (!question || face.chatPending) return;
-  if (!provider) { add('note', '대화할 수 있는 공급자가 없습니다. 설정 모드에서 확인하세요.'); return; }
+  if (!question) { status('하고 싶은 말을 적거나 말하기를 눌러 주세요.'); $('#q').focus(); return; }
+  // 보내기 단추는 막지 않는다. 답을 기다리는 중이면 알려 준다.
+  if (face.chatPending) { status('아직 답을 만들고 있어요. 그만 들으려면 멈추기를 눌러 주세요.'); return; }
+  if (!provider) { note('대화할 수 있는 모델을 찾지 못했어요. 설정에서 대화 모델을 확인해 주세요.'); return; }
+  stopSpeaking();
+  status('');
+  $('#log .empty')?.remove();
   add('me', question);
   $('#q').value = '';
   face.chatPending = true;
-  $('#send').disabled = true;
-  const wait = add('bot', '…');
+  say('…');
+  const { line, bubble } = addBotLine();
   try {
-    const r = await api('POST', '/api/chat', { provider, question, memoryIds: [] });
-    if (r.status === 'sent') {
-      wait.textContent = r.reply.discarded ? '(멈춤)' : r.reply.text;
-      if (r.reply.discarded) wait.className = 'msg note';
+    const r = await api('POST', '/api/chat', { provider, question, memoryIds: [], ...(ambient ? { ambient: true } : {}) });
+    if (r.status === 'sent' && !r.reply.discarded) {
+      face.chatPending = false;
+      countTalk();
+      say(r.reply.text);
+      speak(r.reply.text); // 읽기 시작과 글자 보이기를 함께
+      await typeOut(bubble, r.reply.text);
+      if (r.skill && !r.skill.asked) note(r.skill.failed ? `${r.skill.name} 조회에 실패해 확인하지 못했어요.` : `k-skill ${r.skill.name}로 찾아봤어요.`);
     } else {
-      wait.className = 'msg note';
-      wait.textContent = '승인이 필요한 요청입니다. 설정 모드의 승인 대기에서 확인하세요.';
+      line.remove();
+      say('');
+      note(r.status === 'sent' ? '답을 멈췄어요.' : '이 요청은 승인이 필요해요. 설정의 승인 대기에서 확인해 주세요.');
     }
   } catch (e) {
-    wait.className = 'msg note';
-    wait.textContent = `답을 받지 못했습니다: ${e.message}`;
+    line.remove();
+    say('');
+    note('답을 받지 못했어요. 잠시 뒤 다시 보내 주세요.', String(e.message));
   } finally {
     face.chatPending = false;
-    $('#send').disabled = false;
     nextPoll = 0;
-    $('#log').scrollTop = $('#log').scrollHeight;
+    refreshTiles();
   }
 }
-$('#bar').addEventListener('submit', (e) => { e.preventDefault(); ask($('#q').value); });
-$('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask($('#q').value); } });
-$('#stop').addEventListener('click', async () => { try { await api('POST', '/api/voice/stop'); } catch { /* 무시 */ } nextPoll = 0; });
+$('#bar').addEventListener('submit', (e) => { e.preventDefault(); unlockSpeech(); ask($('#q').value); });
+$('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); unlockSpeech(); ask($('#q').value); } });
+$('#q').addEventListener('input', () => status(''));
+$('#stop').addEventListener('click', async () => { stopSpeaking(); say(''); try { await api('POST', '/api/voice/stop'); } catch { /* 무시 */ } nextPoll = 0; status('말하던 것을 멈췄어요.'); });
 
 // ---------- 말하기(누르면 녹음, 말이 끝나면 자동으로 멈추고 받아 적어 보냄) ----------
 // 마이크는 보안 연결(HTTPS 또는 이 기기 주소)에서만 브라우저가 허락한다.
@@ -191,32 +855,39 @@ function micReset() {
   Object.assign(mic, { stream: null, ctx: null, proc: null, timer: null, cap: null, seg: null });
   face.recording = false;
   $('#mic').setAttribute('aria-pressed', 'false');
+  $('#mic').setAttribute('aria-label', '말하기');
+  $('#tip-mic').textContent = '말하기';
+  ambientResume();
 }
 async function micStop() {
   if (!mic.cap) return;
   const ms = mic.cap.recordedMs;
   const wav = mic.cap.stop();
   micReset();
-  if (!mic.heard || ms < 300) { add('note', '말소리를 듣지 못했습니다.'); return; }
-  const status = add('note', '받아 적는 중…');
+  if (!mic.heard || ms < 300) { status('말소리를 듣지 못했어요. 마이크 가까이에서 다시 말해 주세요.'); return; }
+  status('받아 적는 중이에요…');
   try {
     const res = await fetch('/api/stt', { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': 'audio/wav' }, body: new Blob([wav], { type: 'audio/wav' }) });
     const data = await res.json();
     if (!res.ok) throw new Error(data.error?.message ?? '받아쓰기 실패');
-    status.remove();
-    if (data.text) await ask(data.text); else add('note', '말소리를 찾지 못했습니다.');
+    status('');
+    if (data.text) await ask(data.text); else status('말소리를 찾지 못했어요. 다시 말해 주세요.');
   } catch (e) {
-    status.textContent = `받아 적지 못했습니다: ${e.message}`;
+    status('');
+    note('말을 받아 적지 못했어요. 다시 말하거나 글로 적어 주세요.', String(e.message));
   }
 }
 async function micStart() {
+  ambientPause();
   try {
     mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
   } catch (e) {
-    add('note', e.name === 'NotAllowedError' ? '마이크 사용이 거부되었습니다.' : e.name === 'NotFoundError' ? '마이크를 찾지 못했습니다.' : `마이크를 열 수 없습니다: ${e.message}`);
+    status(e.name === 'NotAllowedError' ? '마이크를 쓸 수 있게 허용해 주세요. 주소창 옆 권한 메뉴에서 바꿀 수 있어요.' : e.name === 'NotFoundError' ? '마이크를 찾지 못했어요. 마이크를 연결해 주세요.' : '마이크를 열지 못했어요. 다른 앱이 쓰고 있다면 닫고 다시 눌러 주세요.');
+    ambientResume();
     return;
   }
-  api('POST', '/api/voice/stop').catch(() => {}); // 읽던 답을 멈춘다(끼어들기)
+  stopSpeaking(); // 이 기기에서 읽던 답을 멈춘다(끼어들기)
+  api('POST', '/api/voice/stop').catch(() => {});
   mic.ctx = new AudioContext();
   const src = mic.ctx.createMediaStreamSource(mic.stream);
   const analyser = mic.ctx.createAnalyser();
@@ -235,6 +906,9 @@ async function micStart() {
   const buf = new Float32Array(analyser.fftSize);
   face.recording = true;
   $('#mic').setAttribute('aria-pressed', 'true');
+  $('#mic').setAttribute('aria-label', '말하기 끝내기');
+  $('#tip-mic').textContent = '말하기 끝내기';
+  status('듣고 있어요. 말을 마치면 자동으로 멈춰요.');
   mic.timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
     const ev = mic.seg.push(V.rmsOf(buf), performance.now());
@@ -244,8 +918,129 @@ async function micStart() {
   }, 50);
 }
 if (micUsable) {
-  $('#mic').hidden = false;
-  $('#mic').addEventListener('click', () => (mic.cap ? micStop() : micStart()));
+  $('#mic-wrap').hidden = false;
+  $('#mic').addEventListener('click', () => { unlockSpeech(); return mic.cap ? micStop() : micStart(); });
+}
+
+// ---------- 부르면 대답하기(주변 대화 듣기, 아이디어 출처: isair/jarvis) ----------
+// 켜 두면 마이크로 말소리만 골라 PC로 보내 받아 적는다. PC는 그 글을 메모리에만 2분 두고(저장 안 함),
+// "자비스"(또는 친구 이름)라고 부르거나 답한 바로 뒤에 이어 말할 때만 대답한다. 끄면 PC에 쌓인 말을 바로 지운다.
+// 켤 때 동의를 받는다. 서버를 다시 켜면 꺼진 상태로 돌아가 다시 동의해야 한다.
+const amb = { stream: null, ctx: null, proc: null, timer: null, cap: null, seg: null, gen: 0, utterStart: 0, queue: Promise.resolve(), paused: false };
+function showAmbient() {
+  const b = $('#ambient');
+  const label = ambientState.on ? '부르면 대답하기 끄기(듣는 중)' : '부르면 대답하기 켜기';
+  b.setAttribute('aria-pressed', String(ambientState.on));
+  b.setAttribute('aria-label', label);
+  $('#tip-ambient').textContent = label;
+  if (ambientState.hintReady) sleepHint(); // 쉬는 화면 준비(아래) 전에는 부르지 않음
+}
+function ambientStopMic() {
+  clearInterval(amb.timer);
+  if (amb.proc) amb.proc.onaudioprocess = null;
+  amb.stream?.getTracks().forEach((t) => t.stop());
+  amb.ctx?.close();
+  Object.assign(amb, { stream: null, ctx: null, proc: null, timer: null, cap: null, seg: null });
+}
+async function ambientStartMic() {
+  if (amb.stream || !ambientState.on || amb.paused) return;
+  amb.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  amb.ctx = new AudioContext();
+  const src = amb.ctx.createMediaStreamSource(amb.stream);
+  const analyser = amb.ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  src.connect(analyser);
+  amb.cap = V.createPcmCapture({ inputRate: amb.ctx.sampleRate, preRollMs: 800, maxMs: 15000 });
+  amb.proc = amb.ctx.createScriptProcessor(4096, 1, 1);
+  amb.proc.onaudioprocess = (e) => amb.cap?.push(e.inputBuffer.getChannelData(0));
+  const mute = amb.ctx.createGain();
+  mute.gain.value = 0;
+  src.connect(amb.proc); amb.proc.connect(mute); mute.connect(amb.ctx.destination);
+  amb.seg = V.createSegmenter({ endSilenceMs: 900, maxMs: 12000 });
+  const buf = new Float32Array(analyser.fftSize);
+  amb.timer = setInterval(() => {
+    if (!amb.seg) return;
+    analyser.getFloatTimeDomainData(buf);
+    const t = performance.now();
+    const ev = amb.seg.push(V.rmsOf(buf), t);
+    if (ev === 'start') { amb.cap.start({ preRoll: true }); amb.utterStart = t; }
+    // 기기가 말하는 중에는 3초까지만 담아 "멈춰"가 빨리 처리되게 한다
+    const cut = amb.cap.recording && face.deviceSpeaking && t - amb.utterStart > 3000;
+    if ((ev === 'end' || cut) && amb.cap.recording) {
+      if (cut) amb.seg.reset();
+      const ms = amb.cap.recordedMs;
+      const wav = amb.cap.stop();
+      if (ms >= 400) ambientSend(wav, ms, t);
+    }
+  }, 50);
+}
+// 차례대로 보낸다(앞 말이 늦게 끝나도 순서 유지). 일시 정지·끄기 뒤에 온 옛 결과는 버린다.
+function ambientSend(wav, utterMs, endedAt) {
+  const gen = amb.gen;
+  amb.queue = amb.queue.then(async () => {
+    if (gen !== amb.gen || !ambientState.on) return;
+    let r;
+    try {
+      const res = await fetch('/api/ambient/hear', { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': 'audio/wav', 'x-jarvis-utter-ms': String(Math.round(utterMs)), 'x-jarvis-ago-ms': String(Math.round(performance.now() - endedAt)) }, body: new Blob([wav], { type: 'audio/wav' }) });
+      r = await res.json();
+      if (!res.ok) {
+        if (r.error?.code === 'ambient_off') { setAmbientLocal(false); status('PC에서 부르면 대답하기가 꺼져 있어요. 다시 켜 주세요.'); }
+        return;
+      }
+    } catch { return; }
+    if (gen !== amb.gen || !ambientState.on) return;
+    if (r.stop) {
+      amb.gen += 1;
+      stopSpeaking();
+      api('POST', '/api/voice/stop').catch(() => {});
+      say('');
+      status('말하던 것을 멈췄어요.');
+      return;
+    }
+    if (r.addressed && r.question) {
+      woke(presence.activity(performance.now()));
+      if (asleep()) applyPresence();
+      ask(r.question, { ambient: true });
+    }
+  });
+}
+function setAmbientLocal(on) {
+  ambientState.on = on;
+  amb.gen += 1;
+  if (on) ambientStartMic().catch((e) => { setAmbientLocal(false); api('PUT', '/api/ambient', { enabled: false }).catch(() => {}); status(e.name === 'NotAllowedError' ? '마이크 사용이 거부돼 부르면 대답하기를 껐어요.' : '마이크를 열지 못해 부르면 대답하기를 껐어요.'); });
+  else ambientStopMic();
+  showAmbient();
+}
+// 말하기 단추를 누르는 동안은 잠깐 멈춘다(마이크를 하나만 쓰게)
+function ambientPause() { amb.paused = true; amb.gen += 1; ambientStopMic(); }
+function ambientResume() { amb.paused = false; if (ambientState.on) ambientStartMic().catch(() => {}); }
+if (micUsable) {
+  $('#ambient-wrap').hidden = false;
+  showAmbient();
+  $('#ambient').addEventListener('click', async () => {
+    unlockSpeech();
+    if (ambientState.on) {
+      setAmbientLocal(false);
+      try { await api('PUT', '/api/ambient', { enabled: false }); } catch { /* 서버가 꺼졌으면 이미 지워짐 */ }
+      status('부르면 대답하기를 껐어요. PC에 남아 있던 말도 지웠어요.');
+      return;
+    }
+    const ok = await askConfirm({
+      title: '부르면 대답하기를 켤까요?',
+      body: '켜 두면 이 기기 마이크가 계속 말소리를 듣고 PC에서 받아 적어요. 받아 적은 말은 PC 메모리에만 2분 동안 두고 파일로 저장하지 않아요. "자비스"라고 부르거나 답한 바로 뒤에 이어 말할 때만 대답해요. 함께 있는 사람들도 알고 동의해야 해요. 끄면 바로 지워요.',
+      ok: '동의하고 켜기',
+    });
+    if (!ok) return;
+    try {
+      await api('PUT', '/api/ambient', { enabled: true, consent: true });
+      setAmbientLocal(true);
+      status('부르면 대답하기를 켰어요. “자비스”라고 불러 보세요.');
+    } catch (e) {
+      note('부르면 대답하기를 켜지 못했어요.', String(e.message));
+    }
+  });
+  // 화면을 다시 열었을 때 PC에서 켜져 있으면 이어서 듣는다
+  api('GET', '/api/ambient').then((s) => { if (s.enabled) setAmbientLocal(true); }).catch(() => {});
 }
 
 // ---------- 장치 점검 ----------
@@ -280,12 +1075,25 @@ async function buildChecks() {
   checksBuilt = true;
   const secure = window.isSecureContext;
 
+  row('app', 'JARVIS 앱');
+  if (app) {
+    set('app', 'ok', `앱으로 실행 중 · 근접 센서 ${app.hasProximity() ? '있음' : '없음'} · 기기 음성 ${app.hasSpeech() ? '준비됨' : '준비 안 됨(기기 설정의 음성 출력에서 한국어를 받아 주세요)'}`);
+    button('app', '연결 설정 열기', () => app.openSetup());
+  } else set('app', 'warn', '브라우저로 열었어요. JARVIS 앱으로 열면 근접 센서·기기 음성·쉬는 화면 밝기 낮추기를 더 쓸 수 있어요.');
+
   row('conn', '연결 방식');
-  set('conn', secure ? 'ok' : 'warn', secure ? `보안 연결(${location.host}) — 마이크·카메라 시험 가능` : `일반 연결(${location.host}) — 브라우저가 마이크·카메라를 막습니다. 이 PC에서 열거나 보안 연결(HTTPS)이 필요합니다.`);
+  set('conn', secure ? 'ok' : 'warn', secure ? `보안 연결(${location.host}) — 마이크·카메라 시험 가능` : `일반 연결(${location.host}) — 브라우저가 마이크·카메라를 막습니다. 이 PC에서 열거나 보안 연결(HTTPS)로 열어 주세요.`);
 
   row('server', 'JARVIS 서버');
   try { const t0 = performance.now(); const info = await api('GET', '/api/info'); set('server', 'ok', `응답 ${Math.round(performance.now() - t0)}ms · ${info.platform} · Node ${info.node}`); }
-  catch (e) { set('server', 'bad', `연결 실패: ${e.message}`); }
+  catch (e) { set('server', 'bad', `연결하지 못했어요. PC에서 JARVIS가 켜져 있는지 확인해 주세요. (${e.message})`); }
+  // PC 점검: 대화 모델·받아쓰기·ffmpeg 등(문제 있는 것만 고치는 방법과 함께)
+  row('pc', 'PC 점검');
+  try {
+    const h = await api('GET', '/api/health');
+    const bad = h.checks.filter((c) => c.state !== 'ok');
+    set('pc', h.summary.fail ? 'bad' : h.summary.warn ? 'warn' : 'ok', bad.length ? bad.map((c) => `${c.name}: ${c.detail}${c.hint ? ` → ${c.hint}` : ''}`).join(' / ') : `${h.checks.length}개 항목 모두 정상`);
+  } catch (e) { set('pc', 'warn', `점검하지 못했어요. (${e.message})`); }
 
   row('screen', '화면');
   const o = screen.orientation?.type ?? (innerWidth > innerHeight ? 'landscape' : 'portrait');
@@ -302,7 +1110,7 @@ async function buildChecks() {
 
   row('net', '네트워크');
   const c = navigator.connection;
-  set('net', navigator.onLine ? 'ok' : 'bad', navigator.onLine ? `연결됨${c?.effectiveType ? ` · ${c.effectiveType}` : ''}${c?.downlink ? ` · 약 ${c.downlink}Mbps` : ''}` : '오프라인');
+  set('net', navigator.onLine ? 'ok' : 'bad', navigator.onLine ? `연결됨${c?.effectiveType ? ` · ${c.effectiveType}` : ''}${c?.downlink ? ` · 약 ${c.downlink}Mbps` : ''}` : '오프라인이에요. 와이파이 연결을 확인해 주세요.');
 
   row('devices', '장치 목록');
   if (navigator.mediaDevices?.enumerateDevices) {
@@ -311,20 +1119,20 @@ async function buildChecks() {
       const count = (k) => list.filter((d) => d.kind === k).length;
       const a = count('audioinput'), v = count('videoinput'), s = count('audiooutput');
       set('devices', a || v ? 'ok' : 'warn', `마이크 ${a}개 · 카메라 ${v}개 · 스피커 ${s}개 (이름은 허락 뒤에 보임)`);
-    } catch (e) { set('devices', 'warn', `확인 못 함: ${e.message}`); }
-  } else set('devices', 'warn', '이 연결에서는 장치 목록을 볼 수 없습니다(보안 연결 필요).');
+    } catch (e) { set('devices', 'warn', `확인하지 못했어요: ${e.message}`); }
+  } else set('devices', 'warn', '이 연결에서는 장치 목록을 볼 수 없어요(보안 연결 필요).');
 
   row('mic', '마이크');
-  if (!secure || !navigator.mediaDevices?.getUserMedia) set('mic', 'warn', '이 연결에서는 시험할 수 없습니다(보안 연결 필요).');
+  if (!secure || !navigator.mediaDevices?.getUserMedia) set('mic', 'warn', '이 연결에서는 시험할 수 없어요(보안 연결 필요).');
   else {
-    set('mic', 'wait', '단추를 누르고 3초 동안 말해 보세요. 녹음은 저장하지 않습니다.');
+    set('mic', 'wait', '마이크 시험을 누르고 3초 동안 말해 보세요. 녹음은 저장하지 않아요.');
     const meter = document.createElement('div'); meter.id = 'meter'; meter.innerHTML = '<i></i>';
     checks.mic.querySelector('.extra').append(meter);
     button('mic', '마이크 시험', async (e) => {
       e.target.disabled = true;
       let stream;
       try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
-      catch (err) { set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됨' : err.name === 'NotFoundError' ? '마이크가 없음' : err.message); e.target.disabled = false; return; }
+      catch (err) { set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 마이크를 허용해 주세요.' : err.name === 'NotFoundError' ? '마이크가 없어요.' : err.message); e.target.disabled = false; return; }
       const ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(an);
       const buf = new Float32Array(an.fftSize); let peak = 0; const t0 = performance.now();
@@ -334,7 +1142,7 @@ async function buildChecks() {
         meter.firstChild.style.width = `${Math.min(100, Math.round(r * 400))}%`;
         if (performance.now() - t0 > 3000) {
           clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); ctx.close(); meter.firstChild.style.width = '0';
-          set('mic', peak > 0.02 ? 'ok' : 'warn', peak > 0.02 ? `소리 들림 (${label}, 최대 ${peak.toFixed(3)})` : `열렸지만 소리가 거의 없음 (${label}, 최대 ${peak.toFixed(3)}) — 말하면서 다시 시험해 보세요`);
+          set('mic', peak > 0.02 ? 'ok' : 'warn', peak > 0.02 ? `소리 들림 (${label}, 최대 ${peak.toFixed(3)})` : `열렸지만 소리가 거의 없어요 (${label}, 최대 ${peak.toFixed(3)}). 말하면서 다시 시험해 보세요.`);
           e.target.disabled = false;
         }
       }, 60);
@@ -342,16 +1150,16 @@ async function buildChecks() {
   }
 
   row('cam', '카메라');
-  if (!secure || !navigator.mediaDevices?.getUserMedia) set('cam', 'warn', '이 연결에서는 시험할 수 없습니다(보안 연결 필요).');
+  if (!secure || !navigator.mediaDevices?.getUserMedia) set('cam', 'warn', '이 연결에서는 시험할 수 없어요(보안 연결 필요).');
   else {
-    set('cam', 'wait', '단추를 누르면 미리 보기만 나옵니다. 저장하지 않습니다.');
+    set('cam', 'wait', '카메라 시험을 누르면 미리 보기만 나와요. 저장하지 않아요.');
     const video = document.createElement('video'); video.id = 'cam'; video.muted = true; video.playsInline = true;
     checks.cam.querySelector('.extra').append(video);
     let camStream = null;
     const b = button('cam', '카메라 시험', async () => {
       if (camStream) { camStream.getTracks().forEach((t) => t.stop()); camStream = null; video.srcObject = null; video.style.display = 'none'; b.textContent = '카메라 시험'; return; }
       try { camStream = await navigator.mediaDevices.getUserMedia({ video: true }); }
-      catch (err) { set('cam', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됨' : err.name === 'NotFoundError' ? '카메라가 없음' : err.message); return; }
+      catch (err) { set('cam', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 카메라를 허용해 주세요.' : err.name === 'NotFoundError' ? '카메라가 없어요.' : err.message); return; }
       video.srcObject = camStream; video.style.display = 'block'; await video.play().catch(() => {});
       const s = camStream.getVideoTracks()[0]?.getSettings?.() ?? {};
       set('cam', 'ok', `영상 들어옴 (${camStream.getVideoTracks()[0]?.label || '이름 없음'}${s.width ? `, ${s.width}×${s.height}` : ''})`);
@@ -360,53 +1168,370 @@ async function buildChecks() {
   }
 
   row('speaker', '스피커');
-  set('speaker', 'wait', '단추를 누르면 이 기기에서 "삐" 소리가 1초 납니다.');
+  set('speaker', 'wait', '소리 내기를 누르면 이 기기에서 "삐" 소리가 1초 나요.');
   button('speaker', '소리 내기', async (e) => {
     try {
       const ctx = new AudioContext(); const osc = ctx.createOscillator(); const g = ctx.createGain();
       osc.frequency.value = 660; g.gain.value = 0.15; osc.connect(g); g.connect(ctx.destination);
       osc.start(); setTimeout(() => { osc.stop(); ctx.close(); }, 1000);
-      set('speaker', 'warn', '소리를 냈습니다. 들렸으면 정상입니다(브라우저는 들렸는지 알 수 없음).');
+      set('speaker', 'warn', '소리를 냈어요. 들렸으면 정상이에요. 안 들리면 무음·진동 모드를 확인해 주세요.');
       e.target.textContent = '다시 내기';
-    } catch (err) { set('speaker', 'bad', `소리를 낼 수 없음: ${err.message}`); }
+    } catch (err) { set('speaker', 'bad', `소리를 내지 못했어요: ${err.message}`); }
   });
 
   row('motion', '움직임·방향 센서');
   const hasMotion = 'DeviceMotionEvent' in window, hasOrient = 'DeviceOrientationEvent' in window;
-  if (!hasMotion && !hasOrient) set('motion', 'warn', '이 브라우저는 움직임 센서를 지원하지 않습니다.');
+  if (!hasMotion && !hasOrient) set('motion', 'warn', '이 브라우저는 움직임 센서를 지원하지 않아요.');
   else {
-    set('motion', 'wait', '센서 값을 기다리는 중… (기기를 살짝 움직여 보세요)');
+    set('motion', 'wait', '센서 값을 기다리는 중이에요… 기기를 살짝 움직여 보세요.');
     let got = false;
     const onMotion = (ev) => { const a = ev.accelerationIncludingGravity; if (a && (a.x ?? a.y ?? a.z) != null) { got = true; set('motion', 'ok', `가속도 센서 작동 (x ${a.x?.toFixed(1)}, y ${a.y?.toFixed(1)}, z ${a.z?.toFixed(1)})`); } };
     const onOrient = (ev) => { if (ev.alpha != null || ev.beta != null) { got = true; set('motion', 'ok', `방향 센서 작동 (기울기 ${ev.beta?.toFixed(0)}°, ${ev.gamma?.toFixed(0)}°)`); } };
     addEventListener('devicemotion', onMotion); addEventListener('deviceorientation', onOrient);
-    setTimeout(() => { if (!got) set('motion', 'warn', '센서 값이 오지 않음 — 센서가 없거나(고정형 기기에 흔함) 보안 연결이 필요합니다.'); }, 4000);
+    setTimeout(() => { if (!got) set('motion', 'warn', '센서 값이 오지 않아요. 센서가 없거나(고정형 기기에 흔함) 보안 연결이 필요해요.'); }, 4000);
   }
 
   row('battery', '전원');
   if (navigator.getBattery) {
     try { const b = await navigator.getBattery(); set('battery', 'ok', `${b.charging ? '충전 중/전원 연결' : '배터리 사용'} · ${Math.round(b.level * 100)}%`); }
-    catch { set('battery', 'warn', '확인 못 함'); }
-  } else set('battery', 'warn', '이 브라우저는 전원 정보를 알려 주지 않습니다.');
+    catch { set('battery', 'warn', '확인하지 못했어요.'); }
+  } else set('battery', 'warn', '이 브라우저는 전원 정보를 알려 주지 않아요.');
+
+  row('prox', '근접 센서');
+  set('prox', proximity ? 'ok' : 'warn', proximity
+    ? '근접 센서를 읽을 수 있어요. 가까이 오면 쉬는 화면이 깨어나요.'
+    : '이 브라우저에서는 근접 센서를 읽을 수 없어요(대부분의 브라우저가 막아 둠). 화면 누르기나 "카메라로 깨우기"로 깨워요. 앱으로 만들면 기기 근접 센서를 쓸 수 있어요.');
 
   row('vibrate', '진동');
   set('vibrate', 'vibrate' in navigator ? 'ok' : 'warn', 'vibrate' in navigator ? '진동 기능 있음(장치에 진동 모터가 있어야 실제로 울림)' : '진동 기능 없음');
 }
 
-$('#tab-check').addEventListener('click', () => {
-  const show = $('#check').hidden;
+function showCheck(show) {
   $('#check').hidden = !show;
   $('#talk').hidden = show;
-  $('#tab-check').setAttribute('aria-pressed', String(show));
-  $('#tab-check').textContent = show ? '대화로 돌아가기' : '장치 점검';
+  $('#bar').hidden = show;
+  const b = $('#tab-check');
+  b.setAttribute('aria-pressed', String(show));
+  const label = show ? '대화로 돌아가기' : '장치 점검 열기';
+  b.setAttribute('aria-label', label);
+  $('#tip-check').textContent = label;
   if (show) buildChecks();
+}
+$('#tab-check').addEventListener('click', () => showCheck($('#check').hidden));
+$('#back-talk').addEventListener('click', () => { showCheck(false); $('#tab-check').focus(); });
+
+// ---------- 쉬는 화면·깨우기(근접 센서 → 누름 → 카메라 잠깐 보기 순으로 가벼운 것부터) ----------
+// 카메라는 계속 켜 두지 않는다. "카메라로 깨우기"를 켰을 때만, 쉬는 동안 15~30초마다 1초쯤 160×120으로 켜서
+// 작은 그림 두 장(32×24 회색)만 비교하고 바로 끈다. 그림은 저장·전송하지 않는다. 누구인지 알아보는 기능은 없다.
+const presence = P.createPresence();
+presence.start(performance.now());
+const camUsable = Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
+let camWake = camUsable && store.get('jarvis.camWake') === 'on';
+let glancing = false;
+let camBusy = false; // 카메라를 한 곳에서만 쓰게(잠깐 보기·등록·누구인지 보기)
+const grabCanvas = document.createElement('canvas');
+grabCanvas.width = 32; grabCanvas.height = 24;
+const grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true });
+const pause = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function showClock() { $('#sleep-time').textContent = new Date().toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' }); }
+function sleepHint() {
+  const ways = [ambientState.on ? '“자비스”라고 부르거나' : null, proximity ? '가까이 오거나' : null, camWake ? '앞에 오거나' : null].filter(Boolean);
+  $('#sleep-hint').textContent = `${ways.length ? `${ways.join(' ')} ` : ''}화면을 누르면 깨어나요.${camWake ? ' 카메라는 30초마다 1초쯤만 켜져요.' : ''}`;
+}
+let clockTimer = null;
+function applyPresence() {
+  const sleeping = presence.state === 'asleep';
+  if (sleeping === asleep()) return;
+  document.body.classList.toggle('asleep', sleeping);
+  $('#sleep').setAttribute('aria-hidden', String(!sleeping));
+  for (const id of ['main', 'header', '#bar']) document.querySelector(id).inert = sleeping;
+  app?.setDim?.(sleeping);
+  clearInterval(clockTimer);
+  if (sleeping) {
+    stopSpeaking();
+    sleepHint(); showClock();
+    clockTimer = setInterval(showClock, 30_000);
+    $('#sleep').focus();
+  } else {
+    nextPoll = 0;
+    refreshTiles();
+  }
+}
+// 사람이 와서 깨어났을 때 한마디(소리 없이 말풍선만)
+function woke(changed, who = null) {
+  if (!changed && !who) return;
+  const was = asleep();
+  applyPresence();
+  if (who) say(`${who.name}님, 어서 와요! 무엇을 도와줄까요?`);
+  else if (was || presence.reason !== 'touch') say('어서 와요! 무엇을 도와줄까요?');
+  if (was) setTimeout(briefingHint, 2500);
+}
+// 누름·키: 쉬는 화면은 그 화면을 누를 때만 깨운다(아래 단추가 같이 눌리지 않게)
+document.addEventListener('pointerdown', () => { if (!asleep()) woke(presence.activity(performance.now())); }, true);
+document.addEventListener('keydown', () => woke(presence.activity(performance.now())), true);
+$('#sleep').addEventListener('click', () => woke(presence.activity(performance.now())));
+
+// 근접 센서: 브라우저가 알려 줄 때만(대부분 막혀 있음)
+function nearNow() {
+  const changed = presence.near(performance.now());
+  woke(changed);
+  if (changed && camWake && people.length && !camBusy) identifyOnce();
+}
+window.addEventListener('jarvis-app', (e) => {
+  const d = e.detail ?? {};
+  if (d.type === 'tts') face.deviceSpeaking = d.state === 'start';
+  else if (d.type === 'proximity' && d.near) nearNow();
 });
+function startProximity() {
+  if (app?.hasProximity?.()) return 'app'; // 앱이 기기 근접 센서를 읽어 알려 줌
+  try {
+    if ('ProximitySensor' in window) {
+      const s = new window.ProximitySensor({ frequency: 2 });
+      s.addEventListener('reading', () => { if (s.near) nearNow(); });
+      s.addEventListener('error', () => {});
+      s.start();
+      return 'sensor';
+    }
+  } catch { /* 권한·지원 없음 */ }
+  if ('onuserproximity' in window) { addEventListener('userproximity', (e) => { if (e.near) nearNow(); }); return 'event'; }
+  if ('ondeviceproximity' in window) { addEventListener('deviceproximity', (e) => { if (e.value < e.max) nearNow(); }); return 'event'; }
+  return null;
+}
+const proximity = startProximity();
+ambientState.hintReady = true;
+
+// 카메라 잠깐 보기
+function grab(video) {
+  grabCtx.drawImage(video, 0, 0, 32, 24);
+  return P.toGray(grabCtx.getImageData(0, 0, 32, 24).data);
+}
+async function glance() {
+  if (camBusy) return;
+  glancing = true;
+  camBusy = true;
+  let stream = null;
+  try {
+    const big = people.length > 0;
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: big ? 320 : 160 }, height: { ideal: big ? 240 : 120 }, frameRate: { ideal: 5, max: 10 }, facingMode: 'user' } });
+    const video = document.createElement('video');
+    video.muted = true; video.playsInline = true; video.srcObject = stream;
+    await video.play();
+    await pause(700); // 카메라가 밝기를 맞출 시간
+    const first = grab(video);
+    await pause(400);
+    const second = grab(video);
+    const r = presence.glance(performance.now(), first, second);
+    if (r.seen) woke(true, big ? await whoIs(video) : null);
+  } catch (e) {
+    // 권한 거부·카메라 없음·다른 앱이 사용 중: 카메라로 깨우기를 끈다
+    setCamWake(false);
+    status(e.name === 'NotAllowedError' ? '카메라 사용이 거부돼 카메라로 깨우기를 껐어요.' : '카메라를 열지 못해 카메라로 깨우기를 껐어요.');
+  } finally {
+    stream?.getTracks().forEach((t) => t.stop());
+    glancing = false;
+    camBusy = false;
+  }
+}
+function setCamWake(on) {
+  camWake = on;
+  store.set('jarvis.camWake', on ? 'on' : 'off');
+  presence.forget();
+  const b = $('#presence');
+  const label = on ? '카메라로 깨우기 끄기' : '카메라로 깨우기 켜기';
+  b.setAttribute('aria-pressed', String(on));
+  b.setAttribute('aria-label', label);
+  $('#tip-presence').textContent = label;
+}
+if (camUsable) {
+  $('#presence-wrap').hidden = false;
+  setCamWake(camWake);
+  $('#presence').addEventListener('click', async () => {
+    if (camWake) { setCamWake(false); status('카메라로 깨우기를 껐어요. 화면을 누르면 깨어나요.'); return; }
+    setCamWake(true);
+    status('카메라 권한을 확인하는 중이에요…');
+    await glance(); // 누른 순간에 권한을 묻고 기준 그림을 한 장 남긴다
+    if (camWake) status('카메라로 깨우기를 켰어요. 쉬는 동안만 15~30초마다 1초쯤 켜지고, 그림은 저장하지 않아요.');
+  });
+}
+
+// ---------- 알아볼 사람(얼굴 등록·알아보기, 2026-11-14 사용자 승인) ----------
+// 모델(face-api 1.7.15, 약 8MB)은 처음 쓸 때만 이 서버에서 받아 브라우저에 일주일 저장한다. 외부로 보내지 않는다.
+// 얼굴 특징(숫자 128개)은 이 기기 브라우저에만 저장(F.STORE_KEY). 사진은 저장하지 않는다.
+const FACE_API = '/static/vendor/face-api-1.7.15';
+let faceApiLoading = null;
+function loadFaceApi() {
+  faceApiLoading ??= (async () => {
+    const api = await import(`${FACE_API}/face-api.esm.js`);
+    try { await api.tf.setBackend('webgl'); } catch { await api.tf.setBackend('cpu'); }
+    await api.tf.ready();
+    await api.nets.tinyFaceDetector.loadFromUri(`${FACE_API}/model`);
+    await api.nets.faceLandmark68TinyNet.loadFromUri(`${FACE_API}/model`);
+    await api.nets.faceRecognitionNet.loadFromUri(`${FACE_API}/model`);
+    return api;
+  })().catch((e) => { faceApiLoading = null; throw e; });
+  return faceApiLoading;
+}
+async function describeFace(api, video) {
+  const r = await api.detectSingleFace(video, new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor();
+  return r ? Array.from(r.descriptor) : null;
+}
+// 이미 켜진 카메라 화면으로 누구인지 본다(실패하면 모르는 사람으로)
+async function whoIs(video) {
+  if (!people.length) return null;
+  try {
+    const api = await loadFaceApi();
+    const d = await describeFace(api, video);
+    return d ? F.bestMatch(people, d) : null;
+  } catch { return null; }
+}
+// 근접 센서로 깨어났을 때: 카메라를 1~2초만 켜서 누구인지 보고 끈다
+async function identifyOnce() {
+  camBusy = true;
+  let stream = null;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 5, max: 10 }, facingMode: 'user' } });
+    const video = document.createElement('video');
+    video.muted = true; video.playsInline = true; video.srcObject = stream;
+    await video.play();
+    await pause(700);
+    const who = await whoIs(video);
+    if (who) woke(false, who);
+  } catch { /* 카메라를 못 열면 이름 없이 둔다 */ } finally {
+    stream?.getTracks().forEach((t) => t.stop());
+    camBusy = false;
+  }
+}
+
+let people = F.parseFaces(store.get(F.STORE_KEY));
+function savePeople() { store.set(F.STORE_KEY, JSON.stringify(people)); }
+function renderPeople() {
+  const items = people.map((p) => {
+    const li = document.createElement('li');
+    const info = document.createElement('div');
+    const name = document.createElement('div'); name.className = 'who-name'; name.textContent = p.name;
+    const meta = document.createElement('div'); meta.className = 'who-meta'; meta.textContent = `얼굴 ${p.samples.length}장 · 동의 ${new Date(p.consentAt).toLocaleDateString('ko-KR')}`;
+    info.append(name, meta);
+    const del = document.createElement('button');
+    del.type = 'button'; del.className = 'btn btn-secondary'; del.textContent = '지우기';
+    del.setAttribute('aria-label', `${p.name} 얼굴 지우기`);
+    del.addEventListener('click', async () => {
+      if (!(await askConfirm({ title: '얼굴을 지울까요?', body: `"${p.name}"의 얼굴 정보를 이 기기에서 지워요. 지우면 되돌릴 수 없어요.`, ok: '얼굴 지우기' }))) return;
+      people = F.removePerson(people, p.id);
+      savePeople(); renderPeople();
+      status(`${p.name}의 얼굴 정보를 지웠어요.`);
+    });
+    li.append(info, del);
+    return li;
+  });
+  if (!items.length) {
+    const li = document.createElement('li');
+    li.className = 'empty';
+    li.textContent = '아직 등록한 사람이 없어요. "사람 등록하기"로 시작하세요.';
+    items.push(li);
+  }
+  $('#face-list').replaceChildren(...items);
+}
+// 지우기 확인 창: 무엇을 지우는지 보이고 처음 초점은 "취소"
+function askConfirm({ title, body, ok }) {
+  const dlg = $('#confirm');
+  const back = document.activeElement;
+  $('#confirm-h').textContent = title; $('#confirm-body').textContent = body; $('#confirm-ok').textContent = ok;
+  return new Promise((resolve) => {
+    const done = (v) => { dlg.removeEventListener('close', onClose); $('#confirm-ok').onclick = null; $('#confirm-cancel').onclick = null; if (dlg.open) dlg.close(); back?.focus?.(); resolve(v); };
+    const onClose = () => done(false);
+    dlg.addEventListener('close', onClose);
+    $('#confirm-ok').onclick = () => done(true);
+    $('#confirm-cancel').onclick = () => done(false);
+    dlg.showModal();
+    $('#confirm-cancel').focus();
+  });
+}
+// 등록 양식: 이름은 칸을 떠날 때 검사, 고치면 바로 오류를 지움. "얼굴 찍기"는 막지 않고 누를 때 검사.
+function nameError() { return $('#face-name').value.trim() ? '' : '이름을 적어 주세요.'; }
+function showNameError(msg) { $('#face-name-err').textContent = msg; $('#face-name').setAttribute('aria-invalid', String(Boolean(msg))); }
+$('#face-name').addEventListener('blur', () => showNameError(nameError()));
+$('#face-name').addEventListener('input', () => showNameError(''));
+$('#face-consent').addEventListener('change', () => { $('#face-consent-err').textContent = ''; });
+function openFaceForm(open) {
+  $('#face-form').hidden = !open;
+  $('#face-add').hidden = open;
+  $('#face-status').textContent = '';
+  if (open) { $('#face-name').value = ''; $('#face-consent').checked = false; showNameError(''); $('#face-consent-err').textContent = ''; $('#face-name').focus(); }
+  else $('#face-add').focus();
+}
+$('#face-add').addEventListener('click', () => openFaceForm(true));
+$('#face-cancel').addEventListener('click', () => { registering = false; openFaceForm(false); });
+let registering = false;
+$('#face-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  if (registering) return;
+  const nErr = nameError();
+  showNameError(nErr);
+  const cErr = $('#face-consent').checked ? '' : '본인이 동의했는지 확인하고 체크해 주세요.';
+  $('#face-consent-err').textContent = cErr;
+  if (nErr) { $('#face-name').focus(); return; }
+  if (cErr) { $('#face-consent').focus(); return; }
+  if (camBusy) { $('#face-status').textContent = '카메라를 잠깐 쓰는 중이에요. 몇 초 뒤 다시 눌러 주세요.'; return; }
+  registering = true; camBusy = true;
+  const st = $('#face-status');
+  const cam = $('#face-cam');
+  let stream = null;
+  try {
+    st.textContent = '얼굴 인식 준비 중이에요… 처음 한 번은 몇 초 걸려요.';
+    const api = await loadFaceApi();
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 10, max: 15 }, facingMode: 'user' } });
+    cam.srcObject = stream; cam.hidden = false;
+    await cam.play();
+    await pause(700);
+    const samples = [];
+    for (let tries = 0; tries < 20 && samples.length < F.SAMPLES && registering; tries += 1) {
+      st.textContent = `얼굴을 화면 가운데에 두고 잠깐 기다려 주세요 (${samples.length}/${F.SAMPLES})`;
+      const d = await describeFace(api, cam);
+      if (d) samples.push(d);
+      await pause(350);
+    }
+    if (!registering) return;
+    if (samples.length < F.SAMPLES) { st.textContent = '얼굴을 충분히 찍지 못했어요. 밝은 곳에서 카메라를 보고 다시 눌러 주세요.'; return; }
+    const name = $('#face-name').value.trim();
+    people = F.addPerson(people, { id: `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`, name, consent: true, samples, now: new Date().toISOString() });
+    savePeople(); renderPeople();
+    presence.forget(); // 다음 잠깐 보기부터 큰 화면으로
+    openFaceForm(false);
+    status(`${name}의 얼굴을 등록했어요. 카메라로 깨어날 때 이름을 불러 줄게요.`);
+  } catch (err) {
+    st.textContent = err.name === 'NotAllowedError' ? '카메라 사용이 거부됐어요. 브라우저 권한에서 카메라를 허용해 주세요.'
+      : err.name === 'NotFoundError' ? '카메라를 찾지 못했어요.'
+      : err instanceof Error && /이름|동의|최대|찍지/.test(err.message) ? err.message
+      : '얼굴 인식을 준비하지 못했어요. 새로 고친 뒤 다시 해 주세요.';
+  } finally {
+    stream?.getTracks().forEach((t) => t.stop());
+    cam.srcObject = null; cam.hidden = true;
+    registering = false; camBusy = false;
+  }
+});
+if (camUsable) { $('#faces-card').hidden = false; renderPeople(); }
+
+// 1초마다: 대화·녹음 중이면 쓰는 중으로 보고, 시간에 따라 쉬는 화면으로, 차례가 되면 카메라로 잠깐 본다
+setInterval(() => {
+  const t = performance.now();
+  if (currentState() !== 'idle' || face.chatPending || !$('#check').hidden || $('#picker').open || !$('#face-form').hidden) presence.activity(t);
+  if (presence.tick(t)) applyPresence();
+  if (camWake && !glancing && !document.hidden && presence.shouldGlance(t)) glance();
+}, 1000);
 
 // ---------- 시작 ----------
+showTalkCount();
+showHello();
 await refreshVoice();
 drawFace();
-try { await pickProvider(); } catch (e) { add('note', `공급자 목록을 불러오지 못했습니다: ${e.message}`); }
-add('note', micUsable ? '🎤를 누르고 말하거나, 아래에 글로 물어보세요.' : '아래에 글로 물어보세요. (말하기는 이 PC에서 열 때나 보안 연결에서만 됩니다)');
+refreshTiles();
+setInterval(() => { if (!document.hidden && !asleep()) refreshTiles(); }, 30000);
+try { await pickProvider(); } catch (e) { note('대화 모델 목록을 불러오지 못했어요. 잠시 뒤 새로 고쳐 주세요.', String(e.message)); }
+const hint = document.createElement('div');
+hint.className = 'empty';
+hint.textContent = micUsable ? '아직 나눈 대화가 없어요. 아래에 적거나 말하기를 눌러 첫 마디를 건네 보세요.' : '아직 나눈 대화가 없어요. 아래에 적어서 첫 마디를 건네 보세요. (말하기는 보안 연결에서만 돼요)';
+$('#log').append(hint);
 </script>
 </body>
 </html>

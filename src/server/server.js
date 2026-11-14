@@ -2,6 +2,7 @@
 // 보안: 127.0.0.1에만 열고, Host 머리글이 이 기기 주소가 아니면 거부(DNS 리바인딩 방지),
 // 모든 /api 요청은 실행마다 새로 만드는 토큰이 있어야 한다(다른 사이트의 요청 방지).
 import { createServer } from 'node:http';
+import { createServer as createHttpsServer } from 'node:https';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -9,6 +10,8 @@ import { platform } from 'node:os';
 import { AppError } from '../errors.js';
 import { ProviderError } from '../providers/contract.js';
 import { checkEcho } from '../voice/echo.js';
+import { MAX_IMAGE_BYTES, IMAGE_STATES } from '../character/avatar-images.js';
+import { listPresets, adoptPreset, applyMascot, CHARACTER_PRESETS } from '../character/presets.js';
 
 const PAGE = fileURLToPath(new URL('./public/index.html', import.meta.url));
 // 자비스 모드: 캐릭터 얼굴과 대화만 크게 보이는 화면(토스 기기·휴대폰용) + 장치 점검. 설정은 PAGE(설정 모드)에서.
@@ -18,7 +21,22 @@ const VOICE_INPUT = fileURLToPath(new URL('./public/voice-input.js', import.meta
 const STATIC_FILES = {
   '/static/voice-input.js': VOICE_INPUT,
   '/static/avatar.js': fileURLToPath(new URL('./public/avatar.js', import.meta.url)),
+  '/static/presence.js': fileURLToPath(new URL('./public/presence.js', import.meta.url)),
+  '/static/faces.js': fileURLToPath(new URL('./public/faces.js', import.meta.url)),
 };
+// 얼굴 알아보기(2026-11-14 사용자 승인으로 내려받음): face-api 1.7.15(MIT, jsdelivr 해시 확인). 화면 브라우저 안에서만 쓴다.
+// 이름에 판(버전)이 들어 있어 바뀌지 않으므로 기기에 일주일 저장해 매번 6MB를 다시 받지 않게 한다.
+const FACE_API_DIR = 'vendor/face-api-1.7.15';
+for (const f of ['face-api.esm.js', 'model/tiny_face_detector_model-weights_manifest.json', 'model/tiny_face_detector_model.bin',
+  'model/face_landmark_68_tiny_model-weights_manifest.json', 'model/face_landmark_68_tiny_model.bin',
+  'model/face_recognition_model-weights_manifest.json', 'model/face_recognition_model.bin']) {
+  STATIC_FILES[`/static/${FACE_API_DIR}/${f}`] = fileURLToPath(new URL(`./public/${FACE_API_DIR}/${f}`, import.meta.url));
+}
+// 오리지널 캐릭터 자비 그림(친구 고르기 미리 보기용, 바뀌지 않는 파일)
+for (const p of CHARACTER_PRESETS.filter((x) => x.mascot)) {
+  for (const s of IMAGE_STATES) STATIC_FILES[`/static/mascot/${p.key}/${s}.png`] = fileURLToPath(new URL(`../character/mascot/${p.key}/${s}.png`, import.meta.url));
+}
+const STATIC_TYPES = { '.js': 'text/javascript; charset=utf-8', '.json': 'application/json; charset=utf-8', '.bin': 'application/octet-stream', '.png': 'image/png' };
 const MAX_BODY = 1024 * 1024;
 
 const STATUS = {
@@ -28,6 +46,11 @@ const STATUS = {
   version_mismatch: 400,
   unknown_executor: 400,
   approval_required: 409,
+  consent_required: 409,
+  not_configured: 503,
+  briefing_failed: 502,
+  skill_failed: 502,
+  ambient_off: 409,
   invalid_state: 409,
   memory_changed: 409,
   target_changed: 409,
@@ -117,11 +140,14 @@ function sameToken(a, b) {
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
 }
 
-export function createAppServer(services, { token = randomBytes(24).toString('hex') } = {}) {
+// tls: { key, cert }를 주면 보안 연결(HTTPS)로 연다(src/app/tls.js). 없으면 지금처럼 HTTP.
+export function createAppServer(services, { token = randomBytes(24).toString('hex'), tls } = {}) {
   const page = (file = PAGE) => readFileSync(file, 'utf8').replace('__JARVIS_TOKEN__', token);
   let allowedHosts = new Set();
 
   const routes = [
+    // PC 점검(doctor.js): 서버·Ollama·받아쓰기·ffmpeg. 점검 함수가 없으면(검사 환경) 서버만 정상으로 알린다.
+    ['GET', /^\/api\/health$/, async () => (services.doctor ? services.doctor() : { summary: { ok: 1, warn: 0, fail: 0 }, checks: [{ id: 'server', name: '화면 서버', state: 'ok', detail: '응답함' }] })],
     ['GET', /^\/api\/info$/, () => ({
       platform: platform(),
       node: process.version,
@@ -134,6 +160,8 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       return { ...mission, preview, events: services.missions.events(mission.id) };
     }],
     ['POST', /^\/api\/missions\/(\d+)\/approve$/, ([, id], q, b) => services.missions.approve(toId(id), b.version)],
+    // 위험 낮음 한꺼번에 승인: { items: [{ id, version }] }
+    ['POST', /^\/api\/missions\/approve-low$/, (m, q, b) => services.missions.approveLow(b.items)],
     ['POST', /^\/api\/missions\/(\d+)\/reject$/, ([, id]) => services.missions.reject(toId(id))],
     ['POST', /^\/api\/missions\/(\d+)\/cancel$/, ([, id]) => services.missions.cancel(toId(id))],
     ['POST', /^\/api\/missions\/(\d+)\/run$/, ([, id]) => services.missions.execute(toId(id))],
@@ -143,6 +171,10 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['POST', /^\/api\/memories$/, (m, q, b) => services.memory.add(b.content, b.tags ?? [])],
     ['PUT', /^\/api\/memories\/(\d+)$/, ([, id], q, b) => services.memory.update(toId(id), b.content, b.tags)],
     ['DELETE', /^\/api\/memories\/(\d+)$/, ([, id]) => services.memory.delete(toId(id))],
+    // 기억 제안: 목록 · 고르기(내용을 고쳐 넣을 수 있음) · 버리기. 고른 것만 기억에 저장된다.
+    ['GET', /^\/api\/memory-suggestions$/, () => services.memorySuggest.list()],
+    ['POST', /^\/api\/memory-suggestions\/(\d+)\/accept$/, ([, id], q, b) => services.memorySuggest.accept(toId(id), b.content)],
+    ['DELETE', /^\/api\/memory-suggestions\/(\d+)$/, ([, id]) => services.memorySuggest.dismiss(toId(id))],
     ['GET', /^\/api\/providers$/, () => services.providers.names().map((n) => services.providers.describe(n))],
     // signal: 화면이 답을 받기 전에 연결을 끊으면(새로 고침·닫기) 생성을 끊는다(2026-11-14 실제 실행 QA).
     ['POST', /^\/api\/chat$/, (m, q, b, signal) => services.chat.ask({
@@ -154,15 +186,32 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       fast: services.chatSettings?.fast === true,
       autoThink: services.chatSettings?.autoThink === true,
       signal,
+      // ambient: 부르면 대답하기로 온 질문이면 방금 들린 대화를 참고 자료로 넣는다(이 기기 안 공급자만).
+      context: b.ambient === true ? services.ambient?.takeContext() ?? null : null,
     })],
-    ['GET', /^\/api\/chat\/settings$/, () => ({ fast: services.chatSettings.fast, autoThink: services.chatSettings.autoThink })],
+    // 주변 대화 듣기(부르면 대답하기): 상태 · 켜기/끄기(켜려면 consent: true) · 기기가 말하기 시작/끝 · 진행 중 판단 버리기
+    ['GET', /^\/api\/ambient$/, () => services.ambient.status()],
+    ['PUT', /^\/api\/ambient$/, (m, q, b) => services.ambient.set({ enabled: b.enabled, consent: b.consent })],
+    ['POST', /^\/api\/ambient\/spoken$/, (m, q, b) => services.ambient.spoken({ state: b.state, text: typeof b.text === 'string' ? b.text.slice(0, 4000) : '' })],
+    ['POST', /^\/api\/ambient\/bump$/, () => services.ambient.bump()],
+    // k-skill 조회 스킬: 목록 · 켜기(동의 필요)/끄기 · 기본 위치(날씨 등)
+    ['GET', /^\/api\/skills$/, () => ({ skills: services.kskills.list(), home: services.kskills.home(), source: 'NomaDamas/k-skill (MIT)' })],
+    ['PUT', /^\/api\/skills\/home$/, (m, q, b) => ({ home: services.kskills.setHome(b.home ?? null) })],
+    ['PUT', /^\/api\/skills\/([a-z0-9-]+)$/, ([, name], q, b) => services.kskills.set(name, { enabled: b.enabled, consent: b.consent })],
+    // 아침 브리핑: 오늘 것·설정 보기 · 지금 만들기 · 켜기/시각 바꾸기
+    ['GET', /^\/api\/briefing$/, () => services.briefings.status()],
+    ['POST', /^\/api\/briefing\/generate$/, (m, q, b, signal) => services.briefings.generate({ signal })],
+    ['PUT', /^\/api\/briefing\/settings$/, (m, q, b) => services.briefings.setSettings({ enabled: b.enabled, time: b.time })],
+    ['GET', /^\/api\/chat\/settings$/, () => ({ fast: services.chatSettings.fast, autoThink: services.chatSettings.autoThink, lowPower: services.chatSettings.lowPower === true })],
     ['PUT', /^\/api\/chat\/settings$/, (m, q, b) => {
       if (b.fast !== undefined && typeof b.fast !== 'boolean') throw new AppError('invalid_input', 'fast는 true 또는 false');
       if (b.autoThink !== undefined && typeof b.autoThink !== 'boolean') throw new AppError('invalid_input', 'autoThink는 true 또는 false');
-      if (b.fast === undefined && b.autoThink === undefined) throw new AppError('invalid_input', 'fast 또는 autoThink가 필요함');
+      if (b.lowPower !== undefined && typeof b.lowPower !== 'boolean') throw new AppError('invalid_input', 'lowPower는 true 또는 false');
+      if (b.fast === undefined && b.autoThink === undefined && b.lowPower === undefined) throw new AppError('invalid_input', 'fast·autoThink·lowPower 중 하나가 필요함');
       if (b.fast !== undefined) services.chatSettings.fast = b.fast;
       if (b.autoThink !== undefined) services.chatSettings.autoThink = b.autoThink;
-      return { fast: services.chatSettings.fast, autoThink: services.chatSettings.autoThink };
+      if (b.lowPower !== undefined) services.chatSettings.lowPower = b.lowPower;
+      return { fast: services.chatSettings.fast, autoThink: services.chatSettings.autoThink, lowPower: services.chatSettings.lowPower === true };
     }],
     ['GET', /^\/api\/voice$/, () => services.voice.status()],
     ['PUT', /^\/api\/voice$/, (m, q, b) => {
@@ -178,13 +227,22 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       ...services.voice.status(),
     })],
     ['GET', /^\/api\/voices$/, () => services.voice.listVoices()],
-    ['GET', /^\/api\/characters$/, () => services.characters.list()],
+    ['GET', /^\/api\/characters$/, () => services.characters.list().map((c) => ({ ...c, images: services.avatarImages.list(c.id) }))],
     ['POST', /^\/api\/characters$/, (m, q, b) => services.characters.create(b)],
     ['PUT', /^\/api\/characters\/(\d+)$/, ([, id], q, b) => services.characters.update(toId(id), b)],
-    ['DELETE', /^\/api\/characters\/(\d+)$/, ([, id]) => services.characters.delete(toId(id))],
+    // 캐릭터를 지우면 그 그림 얼굴 폴더도 지운다
+    ['DELETE', /^\/api\/characters\/(\d+)$/, ([, id]) => { const r = services.characters.delete(toId(id)); services.avatarImages.removeAll(toId(id)); return r; }],
     ['POST', /^\/api\/characters\/(\d+)\/activate$/, ([, id]) => services.characters.setActive(toId(id))],
     ['POST', /^\/api\/characters\/deactivate$/, () => ({ active: services.characters.setActive(null) })],
     ['POST', /^\/api\/characters\/(\d+)\/preview$/, ([, id]) => services.voice.preview(toId(id))],
+    // 고를 수 있는 캐릭터(치이카와·산리오): 목록 · 고르기(같은 이름이 있으면 그 캐릭터를 적용, 없으면 만들어 적용)
+    ['GET', /^\/api\/character-presets$/, () => listPresets(services.characters)],
+    ['POST', /^\/api\/character-presets\/([a-z0-9-]+)\/adopt$/, ([, key]) => {
+      const r = adoptPreset(services.characters, key);
+      // 오리지널 캐릭터(자비)는 그림 얼굴 5장을 함께 넣는다(이미 그림이 있으면 그대로 둠)
+      const added = r.mascot ? applyMascot(services.avatarImages, r.character.id, IMAGE_STATES, r.key) : 0;
+      return { ...r, imagesAdded: added, images: services.avatarImages.list(r.character.id) };
+    }],
     ['GET', /^\/api\/meetings$/, () => services.meetings.list()],
     // 회의록 검색(FR-008a): ?q= 제목·녹취 글. 이 기기 안에서만 찾는다.
     ['GET', /^\/api\/meetings\/search$/, (m, q) => services.meetings.search(q.get('q') ?? '')],
@@ -195,14 +253,14 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['POST', /^\/api\/meetings\/(\d+)\/stop$/, ([, id]) => services.liveMeetings.stop(toId(id))],
   ];
 
-  const server = createServer(async (req, res) => {
+  const handler = async (req, res) => {
     try {
       if (!allowedHosts.has(req.headers.host)) return send(res, 421, { error: { code: 'bad_host', message: '이 기기 주소로만 접속할 수 있음' } });
       const url = new URL(req.url, 'http://127.0.0.1');
       if (req.method === 'GET' && (url.pathname === '/' || url.pathname === '/index.html')) {
         return send(res, 200, page(), {
           // media-src blob: 회의 원음을 토큰으로 받아 브라우저 안에서 재생하기 위함
-          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'",
+          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; img-src 'self' blob:; frame-ancestors 'none'",
           'x-frame-options': 'DENY',
           // 마이크는 이 화면에서만(다른 사이트를 끼워 넣어 쓰지 못하게)
           'permissions-policy': 'microphone=(self), camera=(), geolocation=()',
@@ -210,7 +268,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       }
       if (req.method === 'GET' && (url.pathname === '/jarvis' || url.pathname === '/jarvis.html')) {
         return send(res, 200, page(JARVIS_PAGE), {
-          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; frame-ancestors 'none'",
+          'content-security-policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; media-src 'self' blob:; img-src 'self' blob:; frame-ancestors 'none'",
           'x-frame-options': 'DENY',
           // 장치 점검에서 카메라 미리 보기를 시험할 수 있게 이 화면만 카메라를 허용(저장·전송 없음)
           'permissions-policy': 'microphone=(self), camera=(self), geolocation=()',
@@ -219,8 +277,10 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       // 화면이 쓰는 정적 스크립트(자료 없음, 토큰 불필요). 정해 둔 파일만 내보낸다.
       const staticFile = req.method === 'GET' ? STATIC_FILES[url.pathname] : undefined;
       if (staticFile) {
-        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
-        return res.end(readFileSync(staticFile, 'utf8'));
+        const ext = staticFile.slice(staticFile.lastIndexOf('.'));
+        const cache = url.pathname.startsWith(`/static/${FACE_API_DIR}/`) || url.pathname.startsWith('/static/mascot/') ? 'public, max-age=604800' : 'no-store';
+        res.writeHead(200, { 'content-type': STATIC_TYPES[ext] ?? 'application/octet-stream', 'cache-control': cache, 'x-content-type-options': 'nosniff' });
+        return res.end(readFileSync(staticFile));
       }
       if (!url.pathname.startsWith('/api/')) return send(res, 404, { error: { code: 'not_found', message: '없는 주소' } });
       if (!sameToken(req.headers['x-jarvis-token'], token)) {
@@ -235,13 +295,28 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
           await readRaw(req, MAX_AUDIO).catch(() => {});
           throw new AppError('invalid_input', '음성 파일(audio/*)만 받을 수 있음');
         }
-        const r = await services.stt.transcribe(await readRaw(req, MAX_AUDIO));
+        // filter: 조용할 때 지어낸 말("시청해 주셔서 감사합니다." 등)을 뺀다(transcript-filter.js).
+        const r = await services.stt.transcribe(await readRaw(req, MAX_AUDIO), { filter: true });
         // ?echo=check: 듣기 모드에서 받아 적은 글이 JARVIS가 방금 읽은 글(스피커 소리)인지 함께 알려 준다(T219).
         if (url.searchParams.get('echo') === 'check') {
           const e = checkEcho(r.text, services.voice.recentSpoken());
           return send(res, 200, { ...r, echo: e.echo, echoOverlap: e.overlap, echoReason: e.reason });
         }
         return send(res, 200, r);
+      }
+      // 주변 대화 듣기: 들린 말 한 마디(본문은 WAV 그대로). 받아 적은 글은 PC 메모리에만 잠깐 둔다.
+      // 머리글 x-jarvis-utter-ms: 말 길이, x-jarvis-ago-ms: 말이 끝나고 보내기까지 걸린 시간.
+      if (url.pathname === '/api/ambient/hear' && req.method === 'POST') {
+        const type = String(req.headers['content-type'] ?? '').toLowerCase();
+        if (!type.startsWith('audio/') && type !== 'application/octet-stream') {
+          await readRaw(req, MAX_AUDIO).catch(() => {});
+          throw new AppError('invalid_input', '음성 파일(audio/*)만 받을 수 있음');
+        }
+        const audio = await readRaw(req, MAX_AUDIO);
+        return send(res, 200, await services.ambient.hear(audio, {
+          utterMs: Math.min(60_000, Number(req.headers['x-jarvis-utter-ms']) || 0),
+          agoMs: Math.min(60_000, Number(req.headers['x-jarvis-ago-ms']) || 0),
+        }));
       }
       // 회의 음성 파일 가져오기(US5): 이 기기 안에서 시간 구간까지 받아 적고, 원음(16kHz WAV)과 녹취를 저장한다.
       if (url.pathname === '/api/meetings/import' && req.method === 'POST') {
@@ -270,6 +345,29 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
         if (seqText !== null && !/^\d{1,9}$/.test(seqText)) throw new AppError('invalid_input', '조각 번호(seq)는 0 이상 정수');
         return send(res, 200, await services.liveMeetings.append(toId(chunkMatch[1]), body, seqText === null ? {} : { seq: Number(seqText) }));
       }
+      // 캐릭터 그림 얼굴(?state=idle·listening·thinking·speaking·speaking2). 본문은 그림 파일 그대로(최대 5MB).
+      // 받기·올리기·지우기 모두 토큰이 필요하다. 화면은 받아서 브라우저 안에서만(blob) 보여 준다.
+      const imageMatch = url.pathname.match(/^\/api\/characters\/(\d+)\/image$/);
+      if (imageMatch) {
+        const id = toId(imageMatch[1]);
+        const state = url.searchParams.get('state') ?? '';
+        if (req.method === 'POST') {
+          services.characters.get(id);
+          const type = String(req.headers['content-type'] ?? '').toLowerCase();
+          if (!type.startsWith('image/') && type !== 'application/octet-stream') {
+            await readRaw(req, MAX_IMAGE_BYTES).catch(() => {});
+            throw new AppError('invalid_input', '그림 파일(image/*)만 받을 수 있음');
+          }
+          return send(res, 200, services.avatarImages.save(id, state, await readRaw(req, MAX_IMAGE_BYTES)));
+        }
+        if (req.method === 'GET') {
+          const img = services.avatarImages.read(id, state);
+          res.writeHead(200, { 'content-type': img.type, 'content-length': img.buf.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+          return res.end(img.buf);
+        }
+        if (req.method === 'DELETE') return send(res, 200, services.avatarImages.remove(id, state));
+        return send(res, 404, { error: { code: 'not_found', message: '없는 주소' } });
+      }
       // 회의 원음 재생용(토큰 필요). 화면은 받아서 브라우저 안에서만 재생한다.
       const audioMatch = url.pathname.match(/^\/api\/meetings\/(\d+)\/audio$/);
       if (audioMatch && req.method === 'GET') {
@@ -291,7 +389,9 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       if (e instanceof AppError) return send(res, STATUS[e.code] ?? 400, { error: { code: e.code, message: e.message } });
       return send(res, 500, { error: { code: 'internal', message: '내부 오류' } });
     }
-  });
+  };
+  const server = tls ? createHttpsServer({ key: tls.key, cert: tls.cert }, handler) : createServer(handler);
+  const scheme = tls ? 'https' : 'http';
 
   return {
     server,
@@ -307,7 +407,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
           const p = server.address().port;
           allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
           if (host) allowedHosts.add(`${host}:${p}`);
-          resolve({ port: p, url: host ? `http://${host}:${p}/` : `http://127.0.0.1:${p}/`, lan: Boolean(host) });
+          resolve({ port: p, url: `${scheme}://${host ?? '127.0.0.1'}:${p}/`, lan: Boolean(host), secure: Boolean(tls) });
         });
       });
     },

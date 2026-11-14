@@ -10,6 +10,7 @@ import { MemoryStore } from '../memory/memory.js';
 import { MeetingStore } from '../meeting/meetings.js';
 import { LiveMeetings } from '../meeting/live.js';
 import { CharacterStore } from '../character/characters.js';
+import { AvatarImages } from '../character/avatar-images.js';
 import { ProviderRegistry } from '../providers/registry.js';
 import { createMockProvider } from '../providers/mock.js';
 import { Conversation, createTransferExecutor, TRANSFER_KIND } from '../conversation/transfer.js';
@@ -17,11 +18,16 @@ import { TurnManager } from '../conversation/turns.js';
 import { SpeechPlayer } from '../voice/player.js';
 import { createSystemSpeaker } from '../voice/system-speaker.js';
 import { SpeechToText } from '../voice/stt.js';
+import { createAmbientService, localJudgeProvider } from '../voice/ambient-service.js';
+import { Briefings } from '../briefing/briefing.js';
+import { MemorySuggester } from '../memory/suggest.js';
+import { KSkills } from '../skills/kskill.js';
 import { acquireDataLock } from './data-lock.js';
 
 const VOICE_KEY = 'voice.enabled';
 const FAST_KEY = 'chat.fast';
 const AUTO_THINK_KEY = 'chat.autoThink';
+const LOW_POWER_KEY = 'power.low';
 const PREVIEW_TEXT = '안녕하세요. 이 목소리로 대답할게요.';
 
 // 목소리마다 OS 합성기를 처음 쓸 때 만든다. 지원하지 않는 OS면 그 문장만 실패로 알린다.
@@ -53,7 +59,8 @@ function systemSpeakerFactory() {
 // 검사용으로 바꿔 끼울 수 있는 것: providers, speaker(목소리와 무관한 고정 스피커), speakerFactory(voice → speaker),
 // stt(SpeechToText 또는 { launcher, ffmpeg } 설정). 없으면 받아쓰기는 "설정 안 됨"으로 알린다.
 // meetingStt: 회의 파일용 받아쓰기(같은 형식). 없으면 stt를 쓴다.
-export function createServices({ dataDir, env = process.env, providers, speaker, speakerFactory, stt, meetingStt, recover = true }) {
+// kskillFetch: k-skill 조회 서버 호출(검사에서 가짜로 바꿈).
+export function createServices({ dataDir, env = process.env, providers, speaker, speakerFactory, stt, meetingStt, recover = true, kskillFetch = globalThis.fetch }) {
   mkdirSync(dataDir, { recursive: true });
   // 같은 데이터 폴더를 쓰는 다른 JARVIS가 있으면 DB를 열거나 복원하기 전에 멈춘다(src/app/data-lock.js).
   const lock = acquireDataLock(dataDir);
@@ -69,6 +76,8 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
   if (!registry.providers.mock) registry.providers.mock = createMockProvider('mock');
   const memory = new MemoryStore(db);
   const characters = new CharacterStore(db, settings);
+  // 캐릭터 그림 얼굴: 이 기기 데이터 폴더(avatars/)에만 둔다
+  const avatarImages = new AvatarImages(join(dataDir, 'avatars'));
   const audioDir = join(dataDir, 'meetings');
   mkdirSync(audioDir, { recursive: true });
   const meetings = new MeetingStore(db, { audioDir });
@@ -99,7 +108,7 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
       return {
         enabled: voice.enabled,
         state: turns.state,
-        character: c ? { id: c.id, name: c.name, voice: c.voice, look: c.look } : null,
+        character: c ? { id: c.id, name: c.name, voice: c.voice, look: c.look, images: avatarImages.list(c.id) } : null,
         lastError: voiceErrors.at(-1) ?? null,
       };
     },
@@ -126,6 +135,7 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
     memory,
     missions,
     characters,
+    avatarImages,
     providers: registry,
     voice,
     // 빠른 답(생각 생략) 설정. 기본 켬(2026-11-14 사용자 결정, T097). 사용자가 끄면 그 값이 재시작 후에도 유지된다.
@@ -135,10 +145,13 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
       // 계산·추론 질문 자동 생각함. 기본 켬(2026-11-14 사용자 결정, T224).
       get autoThink() { return settings.get(AUTO_THINK_KEY, true) === true; },
       set autoThink(v) { settings.set(AUTO_THINK_KEY, v === true); },
+      // 저전력 모드(아이디어 출처: isair/jarvis): 판정·브리핑·기억 제안 모델을 1분만 메모리에 두고 미리 올리지 않는다. 기본 끔.
+      get lowPower() { return settings.get(LOW_POWER_KEY, false) === true; },
+      set lowPower(v) { settings.set(LOW_POWER_KEY, v === true); },
     },
     // 빠른 작업: 모의 2개 + 이 기기 기억·회의록 검색(FR-007a)
     quick: new QuickActions(missions, { ...defaultQuickActions(), ...searchQuickActions({ memory, meetings }) }),
-    chat: new Conversation({ missions, memory, providers: registry, turns, characters }),
+    chat: new Conversation({ missions, memory, providers: registry, turns, characters, onExchange: (e) => services.memorySuggest?.record(e) }),
     meetings,
     stt: stt instanceof SpeechToText ? stt : new SpeechToText(stt ?? {}),
     meetingStt: null,
@@ -153,10 +166,22 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
       services.stt.close();
       if (services.meetingStt !== services.stt) services.meetingStt.close();
     },
-    close: () => { turns.cancel(); services.stt.close(); if (services.meetingStt !== services.stt) services.meetingStt.close(); db.close(); lock.release(); },
+    close: () => { services.briefings?.stop(); services.memorySuggest?.stop(); turns.cancel(); services.stt.close(); if (services.meetingStt !== services.stt) services.meetingStt.close(); db.close(); lock.release(); },
   };
   // 회의 파일 받아쓰기(VAD 없는 엔진). 따로 주지 않으면 일반 받아쓰기를 같이 쓴다.
   services.meetingStt = meetingStt ? (meetingStt instanceof SpeechToText ? meetingStt : new SpeechToText(meetingStt)) : services.stt;
+  // 주변 대화 듣기(부르면 대답하기): 기본 꺼짐, 동의해야 켬, 들은 말은 메모리에만 2분.
+  // 보조 모델 정책: 짧은 판단(판정·사실 뽑기)은 JARVIS_OLLAMA_FAST_MODEL(있으면, 작은 모델)로, 저전력이면 1분만 메모리에.
+  const modelPolicy = () => ({ keepAlive: services.chatSettings.lowPower ? '1m' : '30m', fastModel: env.JARVIS_OLLAMA_FAST_MODEL || null, lowPower: services.chatSettings.lowPower });
+  services.modelPolicy = modelPolicy;
+  services.ambient = createAmbientService({ stt: services.stt, providers: registry, characters, policy: modelPolicy });
+  // 기억 제안: 대화가 5분 멈추면 이 기기 안 모델이 오래 갈 사실만 뽑아 "기억할까요?"로 둔다(저장은 사용자가 고른 것만).
+  services.memorySuggest = new MemorySuggester({ memory, providers: registry, localProvider: () => localJudgeProvider(registry), policy: modelPolicy });
+  // k-skill 조회 스킬(vendor/k-skill): 스킬마다 한 번 동의해야 쓴다. 대화(이 기기 안 공급자)와 아침 브리핑 날씨에 쓴다.
+  services.kskills = new KSkills({ settings, providers: registry, localProvider: () => localJudgeProvider(registry), policy: modelPolicy, env, fetchImpl: kskillFetch });
+  services.chat.skills = services.kskills;
+  // 아침 브리핑: 이 기기 안 자료로 이 기기 안 모델이 미리 쓴다(시작은 main.js에서 start()).
+  services.briefings = new Briefings({ db, settings, missions, meetings: services.meetings, providers: registry, characters, localProvider: () => localJudgeProvider(registry), policy: modelPolicy, weather: () => services.kskills.briefingWeather() });
   // 회의 마이크 녹음(T123): 조각을 원음 뒤에 붙이고 회의용 엔진으로 받아 적는다.
   services.liveMeetings = new LiveMeetings(services.meetings, services.meetingStt);
   // 앱 시작 때 한 번: 실행·녹음 도중 꺼진 것을 중단으로 표시한다(자동 재실행 없음).

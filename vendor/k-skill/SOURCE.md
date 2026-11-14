@@ -1,0 +1,36 @@
+# k-skill 설명서 사본
+
+- 출처: https://github.com/NomaDamas/k-skill (MIT, LICENSE 참고)
+- 판: 9766d20
+- 옮긴 것: 외부 조회 서버(k-skill-proxy) 경유 "조회 전용"(profiles: lookup+proxy) 스킬 중 경로(/v1/...)가 적힌 29개의 skill.json·instruction.md만. 코드·패키지·실행 파일은 옮기지 않았다.
+- JARVIS는 이 설명서를 이 PC 안 모델에게 읽혀 조회 경로를 고르게 하고, 사용자가 스킬마다 한 번 허락한 것만 정해진 서버에 GET으로 묻는다(src/skills/kskill.js).
+
+- assembly-bill-vote-search
+- bccard-eatpl-search
+- cheap-gas-nearby
+- fine-dust-location
+- fsc-corporate-info
+- g2b-sanctioned-supplier
+- han-river-water-level
+- household-waste-info
+- k-schoollunch-menu
+- kamis-food-price
+- komsa-ferry-info
+- kopis-performance-search
+- korea-weather
+- korean-holiday-calendar
+- korean-stock-search
+- korean-transit-route
+- kr-whois-lookup
+- mfds-drug-safety
+- mfds-food-safety
+- mofa-travel-safety
+- national-pension-workplace
+- naver-news-search
+- nhis-care-checkup-search
+- parking-lot-search
+- real-estate-search
+- religious-facility-search
+- seoul-bike
+- seoul-subway-arrival
+- seoul-weather-risk

@@ -67,11 +67,11 @@ test('빠른 답 설정: 기본 켬(think:false), 끄면 think를 보내지 않�
   });
   // 검사가 실패해도 서버를 닫아 검사 프로그램이 멈추지 않게 한다(2026-11-14 변이 검사 중 멈춤 발견).
   try {
-    assert.deepEqual((await call('GET', '/api/chat/settings')).json, { fast: true, autoThink: true });
+    assert.deepEqual((await call('GET', '/api/chat/settings')).json, { fast: true, autoThink: true, lowPower: false });
     const r = (await call('POST', '/api/chat', { provider: 'rec', question: '빠른 답' })).json;
     assert.equal(r.fast, true);
     assert.equal(rec.sent[0].think, false);
-    assert.deepEqual((await call('PUT', '/api/chat/settings', { fast: false })).json, { fast: false, autoThink: true });
+    assert.deepEqual((await call('PUT', '/api/chat/settings', { fast: false })).json, { fast: false, autoThink: true, lowPower: false });
     const slow = (await call('POST', '/api/chat', { provider: 'rec', question: '느린 답' })).json;
     assert.equal(slow.fast, false);
     assert.equal('think' in rec.sent[1], false);
@@ -141,11 +141,11 @@ test('화면 API: 자동 생각 설정 기본 켬, 따로 끄고 켜기, 잘못�
     rq.on('error', reject);
     rq.end(body ? JSON.stringify(body) : undefined);
   });
-  assert.deepEqual((await call('GET', '/api/chat/settings')).json, { fast: true, autoThink: true });
+  assert.deepEqual((await call('GET', '/api/chat/settings')).json, { fast: true, autoThink: true, lowPower: false });
   const r = (await call('POST', '/api/chat', { provider: 'rec', question: '35 * 12 계산해 줘' })).json;
   assert.equal(r.thinking.mode, 'auto-think');
   assert.equal(rec.sent[0].think, true);
-  assert.deepEqual((await call('PUT', '/api/chat/settings', { autoThink: false })).json, { fast: true, autoThink: false });
+  assert.deepEqual((await call('PUT', '/api/chat/settings', { autoThink: false })).json, { fast: true, autoThink: false, lowPower: false });
   await call('POST', '/api/chat', { provider: 'rec', question: '35 * 12 계산해 줘' });
   assert.equal(rec.sent[1].think, false);
   assert.equal((await call('PUT', '/api/chat/settings', { autoThink: 'yes' })).status, 400);

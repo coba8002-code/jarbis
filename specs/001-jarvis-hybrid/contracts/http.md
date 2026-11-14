@@ -23,6 +23,9 @@
 | PUT/DELETE | /api/characters/:id | 캐릭터 수정 · 삭제(적용 중이면 적용 해제) |
 | POST | /api/characters/:id/activate · /api/characters/deactivate | 적용 · 적용 해제 |
 | POST | /api/characters/:id/preview | 그 목소리로 한 문장 말하기(실제 소리) |
+| GET | /api/character-presets | 고를 수 있는 캐릭터(치이카와·산리오) `[{key, group, name, blurb, look, have, active}]` |
+| POST | /api/character-presets/:key/adopt | 고르기: 같은 이름이 있으면 그 캐릭터 적용, 없으면 만들어 적용 → `{character, created}` |
+| POST/GET/DELETE | /api/characters/:id/image?state= | 그림 얼굴 올리기(본문 = 그림 바이트, PNG·JPEG·GIF·WebP, 5MB 이하, SVG 거부) · 받기(nosniff, 저장 안 함) · 지우기. state: idle·listening·thinking·speaking·speaking2. 캐릭터 목록과 /api/voice의 character에 `images:[{state, v}]` |
 
 `GET /api/voice`는 적용 캐릭터(`character`)도 함께 돌려준다. 소리 읽기 설정과 적용 캐릭터는 재시작 후에도 유지된다.
 
@@ -35,6 +38,7 @@
 
 외부 접속(`node src/main.js --host <이 PC 와이파이 주소>`): 기본은 127.0.0.1 전용. host를 주면 그 주소로도 열리고 Host 허용 목록에 더한다.
 화면을 열면 토큰도 함께 받으므로 같은 와이파이에서 주소를 아는 누구나 쓸 수 있다(집처럼 믿는 망에서만). 이 연결은 보안 연결이 아니라 브라우저가 마이크·카메라를 막는다.
+`--https`를 함께 주면 같은 경로를 HTTPS로만 연다(데이터 폴더 tls/의 자체 서명 인증서, 일반 http는 받지 않음). 처음 여는 기기는 인증서 경고를 확인하고 들어간다.
 
 ## 2026-11-14 추가
 
@@ -64,3 +68,19 @@
   - `GET /api/quick` 항목에 `param`(입력 이름: `text` 또는 `q`). 새 빠른 작업 `memory-search`·`meeting-search`(`{params:{q}}`) → 승인 대기 미션. 실행 결과는 `{count, memoryIds}` / `{count, truncated, hits:[{meetingId, titleMatch, segments:[{id,start_ms,end_ms}]}]}`(원문 없음).
   - 캐릭터 `look: {shape: circle|rounded|drop, color: #RRGGBB, eyes: round|line|dot}`(만들기·수정, 없으면 기본 얼굴, `null`이면 기본으로). `GET /api/voice`의 `character`에 `look`. `GET /static/avatar.js`(토큰 불필요, 얼굴 그리기 스크립트).
 - `GET /api/meetings/:id/audio`: 저장한 원음(`audio/wav`, 토큰 필요). 없으면 404. 화면 CSP는 `media-src 'self' blob:`.
+- 2026-11-14 Phase 24(다른 자비스 아이디어):
+  - `GET /api/ambient` → `{enabled, consentAt, windowSeconds, segments, judge, names}`. `PUT /api/ambient {enabled, consent}`: 켜려면 `consent:true`(없으면 409 `consent_required`), 끄면 쌓인 말을 지움.
+  - `POST /api/ambient/hear`: 본문은 16kHz WAV(`audio/*`), 머리글 `x-jarvis-utter-ms`(말 길이)·`x-jarvis-ago-ms`(말이 끝나고 보내기까지). 꺼져 있으면 409 `ambient_off`. 응답: `{heard, addressed:false, reason:'ambient'|'mentioned'|'not_directed'}` · `{heard, addressed:true, question, mode:'name'|'hot', verdict, judge:'model'|'rules'}` · `{heard, stop:true}` · `{ignored:'echo'|'filtered'|'silence'|'secret'|'stale'}`.
+  - `POST /api/ambient/spoken {state:'start'|'end', text}`: 기기가 소리로 읽기 시작·끝. `POST /api/ambient/bump`: 진행 중 판단 버리기.
+  - `POST /api/chat`의 `ambient:true`: 방금 부른 말이면 주변 대화(30초 안, 한 번만)를 참고 자료로 넣음 — 이 기기 안 공급자일 때만. 외부 공급자로 보내는 질문은 비밀 값을 가리고 응답에 `redacted`(가린 수).
+  - `POST /api/stt`: 이제 헛소리 거르기를 함. 뺀 구간이 있으면 `filtered:[{text, reason:'no_speech'|'low_confidence'|'made_up'}]`.
+  - `GET /api/briefing` → `{enabled, time, today:{day,text,sources,model,created_at}|null, generating, lastError, provider}`. `POST /api/briefing/generate`(이 기기 안 모델 없으면 503 `not_configured`). `PUT /api/briefing/settings {enabled?, time?:'HH:MM'}`.
+  - 미션에 `tier:'low'|'high'`. `POST /api/missions/approve-low {items:[{id, version}]}`(1~50개) → 항목별 `{id, ok, mission|error}`(높음·버전 다름은 그 항목만 실패).
+  - `GET /api/memory-suggestions` → `[{id, content, createdAt}]`. `POST /api/memory-suggestions/:id/accept {content?}` → 저장한 기억(태그 `제안`). `DELETE /api/memory-suggestions/:id`.
+  - `GET /api/health` → `{summary:{ok,warn,fail}, checks:[{id,name,state,detail,hint?}]}`.
+  - `GET/PUT /api/chat/settings`에 `lowPower`(저전력 모드).
+- 2026-11-14 Phase 25(k-skill):
+  - `GET /api/skills` → `{skills:[{name, description, category, categoryKo, enabled, consentAt, host, official, routes, keywords}], home, source}`.
+  - `PUT /api/skills/:name {enabled, consent}`: 켜려면 `consent:true`(없으면 409 `consent_required`). 없는 스킬 404.
+  - `PUT /api/skills/home {home:{name?, lat, lon}|null}`: 한국 안 위도 33~39·경도 124~132만(아니면 400).
+  - `POST /api/chat` 응답에 `skill:{name, path, failed}` 또는 되물을 때 `skill:{name, asked:true}`(이 기기 안 공급자일 때만 스킬을 씀).

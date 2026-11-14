@@ -8,6 +8,7 @@ import { existsSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { AppError } from '../errors.js';
 import { parseWav, isWhisperReady } from './wav.js';
+import { filterSegments } from './transcript-filter.js';
 
 const PROMPT = 'JARVIS';
 
@@ -145,7 +146,8 @@ export class SpeechToText {
 
   // segments: 시간 구간(ms)도 받기(회의록용). keepWav: 변환한 16kHz WAV를 함께 돌려주기(원음 저장용).
   // maxSeconds: 이 호출의 최대 길이(회의는 더 길게 허용).
-  async transcribe(audio, { segments = false, keepWav = false, maxSeconds = this.maxSeconds } = {}) {
+  // filter: 헛소리 거르기(transcript-filter.js). 켜면 구간별 확률을 받아 지어낸 말을 빼고, 뺀 것은 filtered로 알린다.
+  async transcribe(audio, { segments = false, keepWav = false, maxSeconds = this.maxSeconds, filter = false } = {}) {
     if (!Buffer.isBuffer(audio) || audio.length === 0) throw new AppError('invalid_input', '음성이 비어 있음');
     let wav = audio;
     let converted = false;
@@ -160,7 +162,7 @@ export class SpeechToText {
     const server = await this.#ensure();
     const form = new FormData();
     form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
-    form.append('response_format', segments ? 'verbose_json' : 'json');
+    form.append('response_format', segments || filter ? 'verbose_json' : 'json');
     const t0 = performance.now();
     let res;
     try {
@@ -182,8 +184,30 @@ export class SpeechToText {
     const fixed = this.normalize ? normalizeTranscript(text) : text;
     const fix = (s) => (this.normalize ? normalizeTranscript(s) : s);
     // 구간 시간은 초 단위로 온다 → 녹음 시작 기준 ms 정수로 바꾼다. 빈 글 구간은 뺀다.
+    if (filter) {
+      // 헛소리 거르기: 구간마다 확률·지어낸 문장을 본다. 구간이 없으면(빈 글) 전체 글로 본다.
+      const list = (Array.isArray(parsed.segments) ? parsed.segments : []).map((s) => ({
+        text: fix(String(s.text ?? '').trim()), rawText: String(s.text ?? '').trim(),
+        noSpeechProb: Number(s.no_speech_prob), avgLogprob: Number(s.avg_logprob),
+      }));
+      const { kept, dropped } = filterSegments(list.length ? list : (fixed ? [{ text: fixed, rawText: text }] : []));
+      if (!segments) {
+        return {
+          text: kept.map((s) => s.text).join(' ').trim(),
+          ...(fixed !== text ? { rawText: text } : {}),
+          ...(dropped.length ? { filtered: dropped } : {}),
+          ...(keepWav ? { wav } : {}),
+          seconds: Number(info.seconds.toFixed(2)),
+          durationMs: Math.round(info.seconds * 1000),
+          ms: Math.round(performance.now() - t0),
+          converted,
+          broken: text.includes('�'),
+        };
+      }
+    }
     const raw = segments
       ? (Array.isArray(parsed.segments) ? parsed.segments : [])
+        .filter((s) => !filter || filterSegments([{ text: String(s.text ?? '').trim(), noSpeechProb: Number(s.no_speech_prob), avgLogprob: Number(s.avg_logprob) }]).kept.length)
         .map((s) => ({ startMs: Math.max(0, Math.round(Number(s.start) * 1000)), endMs: Math.round(Number(s.end) * 1000), text: fix(String(s.text ?? '').trim()) }))
         .filter((s) => s.text && Number.isFinite(s.startMs) && Number.isFinite(s.endMs) && s.endMs > s.startMs)
         // 문장부호만 있는 구간(실제 whisper가 마침표만 따로 내놓음, 2026-11-14 QA)은 앞 구간에 붙이고, 앞 구간이 없으면 뺀다.

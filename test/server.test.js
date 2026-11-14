@@ -176,8 +176,8 @@ test('자비스 모드 화면: 토큰이 들어가고, 이 화면만 카메라 �
   assert.equal(settings.headers['permissions-policy'], 'microphone=(self), camera=(), geolocation=()');
   // 화면은 이 서버의 정적 스크립트만 불러오고, 외부 주소·외부 스크립트가 없다
   assert.doesNotMatch(r.text, /https?:\/\//);
-  assert.deepEqual([...r.text.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort(), ['/static/avatar.js', '/static/voice-input.js']);
-  for (const s of ['/static/avatar.js', '/static/voice-input.js']) assert.equal((await call('GET', s, undefined, { token: null })).status, 200);
+  assert.deepEqual([...r.text.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort(), ['/static/avatar.js', '/static/faces.js', '/static/presence.js', '/static/voice-input.js']);
+  for (const s of ['/static/avatar.js', '/static/faces.js', '/static/presence.js', '/static/voice-input.js']) assert.equal((await call('GET', s, undefined, { token: null })).status, 200);
   // 다른 호스트 이름으로는 거부(DNS 리바인딩 방지는 그대로)
   assert.equal((await call('GET', '/jarvis', undefined, { token: null, host: 'evil.example' })).status, 421);
 });

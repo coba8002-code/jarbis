@@ -65,6 +65,14 @@ CREATE TABLE IF NOT EXISTS transcript_segments (
   end_ms INTEGER NOT NULL,
   text TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS briefings (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  day TEXT NOT NULL UNIQUE,
+  text TEXT NOT NULL,
+  sources TEXT NOT NULL DEFAULT '[]',
+  model TEXT,
+  created_at TEXT NOT NULL
+);
 `;
 
 export function openDb(path) {

@@ -129,7 +129,14 @@ function ollama(env, fetchImpl) {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         // request.think가 true/false로 정해졌을 때만 넘긴다(생각 끄기 = 빠른 답, T097). 없으면 모델 기본값.
-        body: JSON.stringify({ model, messages: request.messages, stream: true, ...(typeof request.think === 'boolean' ? { think: request.think } : {}) }),
+        // format('json')·options(temperature 등)·keepAlive: 판정기처럼 짧은 JSON 답이 필요할 때만 넘긴다.
+        body: JSON.stringify({
+          model, messages: request.messages, stream: true,
+          ...(typeof request.think === 'boolean' ? { think: request.think } : {}),
+          ...(request.format === 'json' ? { format: 'json' } : {}),
+          ...(request.options && typeof request.options === 'object' ? { options: request.options } : {}),
+          ...(typeof request.keepAlive === 'string' ? { keep_alive: request.keepAlive } : {}),
+        }),
       }, { signal, secrets: [] });
       for await (const line of readLines(name, res.body, signal)) {
         if (!line.trim()) continue;

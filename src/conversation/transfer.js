@@ -6,6 +6,7 @@ import { createHash } from 'node:crypto';
 import { AppError } from '../errors.js';
 import { ProviderError } from '../providers/contract.js';
 import { needsThinking } from './reasoning.js';
+import { redactSecrets } from '../security/redact.js';
 
 export const TRANSFER_KIND = 'provider.send';
 
@@ -14,11 +15,13 @@ function hashOf(text) {
 }
 
 // character: { name, persona } | null — 적용한 캐릭터의 말투를 첫 시스템 메시지로 넣는다.
-function buildMessages(question, memoryTexts, character) {
+// context: 주변 대화(참고 자료). 이 기기 안 공급자에게만 넣는다(ask에서 확인).
+function buildMessages(question, memoryTexts, character, context = null) {
   const messages = [];
   if (character) {
     messages.push({ role: 'system', content: `너는 "${character.name}"(이)라는 캐릭터로 대답한다. 성격·말투: ${character.persona}` });
   }
+  if (context) messages.push({ role: 'system', content: context });
   if (memoryTexts.length) {
     messages.push({
       role: 'system',
@@ -82,7 +85,9 @@ export function createTransferExecutor({ memory, providers }) {
 export class Conversation {
   // turns: 소리로 읽을 때 쓰는 TurnManager(선택). 있으면 끼어들기·재생 규칙을 따른다.
   // characters: 적용 캐릭터를 알려 주는 저장소(선택).
-  constructor({ missions, memory, providers, turns, characters }) {
+  // onExchange: 답을 받은 뒤 { question, answer, remote }를 알린다(기억 제안용, 선택).
+  constructor({ missions, memory, providers, turns, characters, onExchange }) {
+    this.onExchange = onExchange;
     this.characters = characters;
     this.missions = missions;
     this.memory = memory;
@@ -131,7 +136,8 @@ export class Conversation {
 
   // fast: 빠른 답(모델의 생각 단계를 끔, 지원하는 공급자만 — 지금은 Ollama). 바로 보내는 대화에만 쓴다.
   // autoThink: 빠른 답이어도 계산·추론으로 보이는 질문은 생각함으로 보낸다(T224).
-  async ask({ provider, question, memoryIds = [], model, speak = false, fast = false, autoThink = false, signal }) {
+  // context: 주변 대화(부르면 대답하기). 외부 공급자에는 절대 넣지 않는다(개인 대화 외부 전송 금지).
+  async ask({ provider, question, memoryIds = [], model, speak = false, fast = false, autoThink = false, signal, context = null }) {
     if (typeof question !== 'string' || question.trim() === '') {
       throw new AppError('invalid_input', '질문이 비어 있음');
     }
@@ -141,7 +147,19 @@ export class Conversation {
     const character = active ? { name: active.name, persona: active.persona } : null;
 
     if (!info.remote || entries.length === 0) {
-      const request = { messages: buildMessages(question.trim(), entries.map((e) => e.content), character) };
+      // 외부 공급자로 보낼 때는 질문 속 비밀 값(키·비밀번호·카드 번호 등)을 가린다(redact.js).
+      const masked = info.remote ? redactSecrets(question.trim()) : { text: question.trim(), count: 0 };
+      // k-skill 조회(켜 둔 스킬만, 이 기기 안 공급자일 때만): 필요하면 외부 조회 결과를 참고 자료로 넣는다.
+      let skillUse = null;
+      if (!info.remote && this.skills) {
+        skillUse = await this.skills.maybeAnswer(question.trim()).catch(() => null);
+        if (skillUse?.ask) {
+          return { status: 'sent', remote: false, spoken: false, fast: Boolean(fast), thinking: { mode: 'skill', reason: null }, reply: { provider, text: skillUse.ask, finishReason: 'stop' }, skill: { name: skillUse.skill, asked: true } };
+        }
+      }
+      const skillNote = skillUse?.context ?? (skillUse?.error ? `외부 조회(k-skill "${skillUse.skill}")가 실패함: ${skillUse.error.message}. 실시간 정보는 확인하지 못했다고 짧게 알린다.` : null);
+      const extra = [info.remote ? null : context, skillNote].filter(Boolean).join('\n\n') || null;
+      const request = { messages: buildMessages(masked.text, entries.map((e) => e.content), character, extra) };
       if (model) request.model = model;
       let thinking = { mode: 'default', reason: null };
       if (fast) {
@@ -150,7 +168,8 @@ export class Conversation {
         thinking = { mode: d.think ? 'auto-think' : 'fast', reason: d.reason };
       }
       const out = await this.#sendNow(provider, request, speak, signal);
-      return { status: 'sent', remote: info.remote, spoken: Boolean(speak && this.turns), fast: Boolean(fast), thinking, reply: out };
+      if (!out.discarded && out.text) { try { this.onExchange?.({ question: question.trim(), answer: out.text, remote: info.remote }); } catch { /* 기록 실패는 대화에 영향 없음 */ } }
+      return { status: 'sent', remote: info.remote, spoken: Boolean(speak && this.turns), fast: Boolean(fast), thinking, reply: out, ...(masked.count ? { redacted: masked.count } : {}), ...(skillUse ? { skill: { name: skillUse.skill, path: skillUse.path ?? null, failed: Boolean(skillUse.error) } } : {}) };
     }
 
     const mission = this.missions.create({
