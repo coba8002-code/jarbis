@@ -286,14 +286,18 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
   return {
     server,
     token,
-    // 127.0.0.1에만 연다. port 0이면 빈 포트를 고른다.
-    listen(port = 0) {
+    // 기본은 127.0.0.1에만 연다(이 기기 전용). port 0이면 빈 포트를 고른다.
+    // host를 주면 그 주소로도 열어, 같은 와이파이의 다른 기기(예: 태블릿)에서 접속할 수 있다.
+    // 이때도 토큰 검사는 그대로라, 주소를 알아도 토큰 없이는 쓸 수 없다. 집처럼 믿는 망에서만 쓴다.
+    listen(port = 0, { host } = {}) {
+      const bind = host ? '0.0.0.0' : '127.0.0.1';
       return new Promise((resolve, reject) => {
         server.once('error', reject);
-        server.listen(port, '127.0.0.1', () => {
+        server.listen(port, bind, () => {
           const p = server.address().port;
           allowedHosts = new Set([`127.0.0.1:${p}`, `localhost:${p}`]);
-          resolve({ port: p, url: `http://127.0.0.1:${p}/` });
+          if (host) allowedHosts.add(`${host}:${p}`);
+          resolve({ port: p, url: host ? `http://${host}:${p}/` : `http://127.0.0.1:${p}/`, lan: Boolean(host) });
         });
       });
     },
