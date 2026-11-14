@@ -1,0 +1,919 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="jarvis-token" content="__JARVIS_TOKEN__">
+<title>JARVIS</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --panel: #ffffff; --text: #1b1f24; --muted: #5d6673; --line: #d9dee5;
+    --accent: #2457c5; --accent-text: #ffffff; --danger: #b42318; --ok: #1a7f37; --warn: #9a6700;
+    --focus: #2457c5;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #111418; --panel: #1a1f25; --text: #e6e9ed; --muted: #9aa4b1; --line: #2c333c;
+      --accent: #6d9bff; --accent-text: #0b1020; --danger: #ff7b72; --ok: #56d364; --warn: #e3b341;
+      --focus: #6d9bff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 12px; padding: 16px 24px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  header h1 { margin: 0; font-size: 18px; }
+  header small { color: var(--muted); }
+  nav { display: flex; gap: 4px; padding: 8px 24px; border-bottom: 1px solid var(--line); background: var(--panel); overflow-x: auto; }
+  nav button { border: 0; background: none; color: var(--muted); padding: 8px 12px; border-radius: 6px; font: inherit; cursor: pointer; white-space: nowrap; }
+  nav button[aria-selected="true"] { color: var(--text); background: var(--bg); font-weight: 600; }
+  main { max-width: 880px; margin: 0 auto; padding: 24px 16px 48px; }
+  section[hidden] { display: none; }
+  /* hidden 속성이 .badge 같은 display 지정에 덮이지 않게 한다(녹음 중 표시가 늘 보이던 결함). */
+  [hidden] { display: none !important; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .muted { color: var(--muted); }
+  .badge { display: inline-block; padding: 0 8px; border-radius: 999px; border: 1px solid var(--line); font-size: 12px; }
+  .badge.pending { color: var(--warn); } .badge.done { color: var(--ok); } .badge.failed, .badge.rejected { color: var(--danger); }
+  dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin: 8px 0; }
+  dt { color: var(--muted); } dd { margin: 0; overflow-wrap: anywhere; }
+  pre { background: var(--bg); border: 1px solid var(--line); border-radius: 6px; padding: 8px; overflow-x: auto; white-space: pre-wrap; margin: 8px 0; }
+  label { display: block; font-weight: 600; margin: 8px 0 4px; }
+  input[type=text], textarea, select { width: 100%; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font: inherit; }
+  textarea { min-height: 72px; }
+  button.act { padding: 8px 14px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--text); font: inherit; cursor: pointer; min-height: 36px; }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.danger { color: var(--danger); }
+  button:disabled { opacity: .5; cursor: default; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+  #toast { position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 560px; margin: 0 auto; padding: 12px 16px; border-radius: 8px; background: var(--text); color: var(--bg); display: none; }
+  .checks label { font-weight: 400; display: flex; gap: 8px; align-items: center; }
+</style>
+</head>
+<body>
+<header><h1>JARVIS</h1><small id="info">불러오는 중</small></header>
+<nav role="tablist" aria-label="메뉴">
+  <button role="tab" data-tab="missions" aria-selected="true">승인 대기</button>
+  <button role="tab" data-tab="quick" aria-selected="false">빠른 작업</button>
+  <button role="tab" data-tab="chat" aria-selected="false">대화</button>
+  <button role="tab" data-tab="memory" aria-selected="false">기억</button>
+  <button role="tab" data-tab="meetings" aria-selected="false">회의</button>
+  <button role="tab" data-tab="characters" aria-selected="false">캐릭터</button>
+</nav>
+<main>
+  <section id="tab-missions" role="tabpanel">
+    <div class="row" style="justify-content:space-between"><h2>작업</h2>
+      <select id="mission-filter" aria-label="상태 거르기" style="width:auto">
+        <option value="pending">승인 대기</option><option value="approved">승인됨</option><option value="">전체</option>
+      </select></div>
+    <div id="missions"></div>
+  </section>
+  <section id="tab-quick" role="tabpanel" hidden>
+    <h2>빠른 작업</h2>
+    <p class="muted">빠른 작업도 바로 실행되지 않고 승인 대기로 들어갑니다.</p>
+    <div id="quick"></div>
+  </section>
+  <section id="tab-chat" role="tabpanel" hidden>
+    <h2>대화</h2>
+    <div class="card">
+      <label for="chat-provider">공급자</label><select id="chat-provider"></select>
+      <label>함께 보낼 기억</label><div id="chat-memories" class="checks muted">기억 없음</div>
+      <label for="chat-question">질문</label><textarea id="chat-question"></textarea>
+      <div class="row" style="margin-top:8px">
+        <button class="act" id="mic-btn" aria-pressed="false">말하기</button>
+        <span id="mic-indicator" class="badge failed" role="status" hidden>● 녹음 중</span>
+        <span class="muted" id="mic-status"></span>
+      </div>
+      <div class="checks">
+        <label><input type="checkbox" id="mic-autosend"> 받아 적으면 바로 보내기</label>
+        <label><input type="checkbox" id="chat-fast"> 빠른 답: 모델의 생각 단계를 건너뜀(지금은 Ollama만, 답이 덜 다듬어질 수 있음)</label>
+        <label><input type="checkbox" id="chat-autothink"> 계산·추론 질문은 자동으로 생각해서 답함(빠른 답일 때)</label>
+        <label><input type="checkbox" id="mic-listen"> 듣기 모드: 말소리를 감지하면 자동으로 녹음하고 읽던 답을 멈춤 (읽는 답 소리는 받아 적어 비교해 무시하지만 실제 스피커로는 미확인이라 이어폰 권장)</label>
+      </div>
+      <p class="muted">녹음은 이 기기 안에서만 받아 적고 저장하지 않습니다. 녹음이 끝나면 마이크를 바로 놓습니다.</p>
+      <label for="stt-file">음성 파일로 질문 넣기 (이 기기 안에서 받아 적음, 파일은 저장하지 않음)</label>
+      <input type="file" id="stt-file" accept="audio/*,.wav,.mp3,.m4a,.webm,.ogg">
+      <p class="muted" id="stt-status"></p>
+      <div class="row" style="margin-top:8px"><button class="act primary" id="chat-send">질문 보내기</button>
+        <button class="act" id="voice-stop">답 멈추기</button></div>
+      <div class="checks" style="margin-top:8px"><label><input type="checkbox" id="voice-enabled"> 답을 이 기기 스피커로 읽기</label></div>
+      <div class="row" style="align-items:center">
+        <div id="chat-avatar" aria-live="off"></div>
+        <p class="muted" id="voice-status" style="flex:1"></p>
+      </div>
+      <p class="muted">외부 공급자에 기억을 담으면 바로 보내지 않고 승인 대기로 들어갑니다.</p>
+    </div>
+    <div id="chat-out"></div>
+  </section>
+  <section id="tab-memory" role="tabpanel" hidden>
+    <h2>기억</h2>
+    <div class="card">
+      <label for="mem-content">새 기억</label><input type="text" id="mem-content">
+      <label for="mem-tags">태그 (쉼표로 구분, 선택)</label><input type="text" id="mem-tags">
+      <div class="row" style="margin-top:8px"><button class="act primary" id="mem-add">기억 저장</button></div>
+    </div>
+    <label for="mem-search">찾기</label><input type="text" id="mem-search">
+    <div id="memories" style="margin-top:12px"></div>
+  </section>
+  <section id="tab-meetings" role="tabpanel" hidden>
+    <h2>회의</h2>
+    <div class="card">
+      <label for="meet-title">회의 이름 (선택)</label><input type="text" id="meet-title">
+      <div class="row" style="margin-top:8px">
+        <button class="act primary" id="meet-rec" aria-pressed="false">마이크로 회의 녹음 시작</button>
+        <span id="meet-rec-indicator" class="badge failed" role="status" hidden>● 회의 녹음 중 <span id="meet-rec-time">00:00</span></span>
+      </div>
+      <p class="muted">녹음은 이 기기 안에서만 받아 적고, 원음은 이 기기에만 저장합니다. 녹음하는 동안 대화 탭의 듣기 모드는 꺼집니다.</p>
+      <div id="meet-live" aria-live="polite"></div>
+      <label for="meet-file">회의 음성 파일 가져오기 (이 기기 안에서 시간별로 받아 적고, 원음은 이 기기에만 저장)</label>
+      <input type="file" id="meet-file" accept="audio/*,.wav,.mp3,.m4a,.webm,.ogg">
+      <p class="muted" id="meet-status"></p>
+    </div>
+    <div class="card">
+      <label for="meet-search">회의록 검색 (회의 제목·녹취 글)</label>
+      <div class="row"><input type="search" id="meet-search" maxlength="100"><button class="act" id="meet-search-btn">찾기</button></div>
+      <p class="muted" id="meet-search-status"></p>
+      <div id="meet-search-results" aria-live="polite"></div>
+    </div>
+    <audio id="meet-audio" controls hidden></audio>
+    <div id="meetings"></div>
+  </section>
+  <section id="tab-characters" role="tabpanel" hidden>
+    <h2>캐릭터</h2>
+    <p class="muted" id="char-active"></p>
+    <div class="card">
+      <label for="char-name">이름</label><input type="text" id="char-name">
+      <label for="char-persona">성격·말투</label><textarea id="char-persona" placeholder="예: 차분하고 짧게 존댓말로 말함"></textarea>
+      <label for="char-voice">목소리</label><select id="char-voice"><option value="">기본 목소리</option></select>
+      <div id="char-look"></div>
+      <label>자산 (그림·소리 등을 쓸 때만, 출처와 이용 조건 필수)</label>
+      <div class="row"><input type="text" id="asset-name" aria-label="자산 이름" placeholder="이름" style="flex:1">
+        <input type="text" id="asset-source" aria-label="자산 출처" placeholder="출처" style="flex:1">
+        <input type="text" id="asset-license" aria-label="자산 이용 조건" placeholder="이용 조건" style="flex:1"></div>
+      <div class="row" style="margin-top:8px"><button class="act primary" id="char-add">캐릭터 저장</button></div>
+    </div>
+    <div id="characters"></div>
+  </section>
+</main>
+<div id="toast" role="status" aria-live="polite"></div>
+<script>
+const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
+const $ = (s) => document.querySelector(s);
+const el = (tag, attrs = {}, ...kids) => {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k.startsWith('on')) n.addEventListener(k.slice(2), v); else if (v !== undefined) n.setAttribute(k, v);
+  }
+  for (const k of kids.flat()) n.append(k instanceof Node ? k : document.createTextNode(String(k)));
+  return n;
+};
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.style.display = 'block'; clearTimeout(toast.h); toast.h = setTimeout(() => { t.style.display = 'none'; }, 4000); }
+async function api(method, path, body) {
+  const res = await fetch(path, { method, headers: { 'x-jarvis-token': TOKEN, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
+  const data = await res.json();
+  if (!res.ok) throw Object.assign(new Error(data.error?.message ?? '오류'), { code: data.error?.code });
+  return data;
+}
+const STATUS = { pending: '승인 대기', approved: '승인됨', rejected: '거절됨', cancelled: '취소됨', running: '실행 중', done: '완료', failed: '실패', interrupted: '중단됨', recording: '녹음 중', stopped: '녹음 끝' };
+async function guard(fn) { try { await fn(); } catch (e) { toast(`할 수 없음: ${e.message}`); } }
+// 같은 목록을 동시에 여러 번 불러와도 가장 마지막 요청만 화면에 반영한다(중복 표시 방지).
+const generation = {};
+function ticket(key) { const n = (generation[key] = (generation[key] ?? 0) + 1); return () => generation[key] === n; }
+function render(box, isLatest, items) { if (isLatest()) box.replaceChildren(...items); }
+
+// 검색 미션 결과(FR-007a)는 번호만 저장돼 있다. 볼 때 지금 자료를 다시 읽어 보이고, 지운 것은 "지워짐"으로만 보인다.
+async function searchResultView(m) {
+  const r = m.result;
+  const box = el('div', { class: 'search-result', 'data-mission-result': m.id }, el('p', { class: 'muted' }, `결과 ${r.count}개${r.truncated ? ' (많아서 일부만)' : ''} · 지금 자료로 보임`));
+  if (m.kind === 'local.memory.search') {
+    const mems = await api('GET', '/api/memories');
+    for (const id of r.memoryIds) {
+      const now = mems.find((x) => x.id === id);
+      box.append(el('div', { class: 'row' }, el('span', { class: 'muted' }, `#${id}`), now ? el('span', {}, now.content) : el('span', { class: 'muted' }, '(지워진 기억)')));
+    }
+  } else {
+    const list = await api('GET', '/api/meetings');
+    for (const h of r.hits) {
+      const meeting = list.find((x) => x.id === h.meetingId);
+      if (!meeting) { box.append(el('p', { class: 'muted' }, `(지워진 회의 #${h.meetingId})`)); continue; }
+      const segs = await api('GET', `/api/meetings/${meeting.id}/segments`);
+      box.append(el('strong', {}, `${meeting.title}${h.titleMatch ? ' · 제목이 맞음' : ''}`));
+      for (const s of h.segments) {
+        const now = segs.find((x) => x.id === s.id);
+        box.append(el('div', { class: 'row' },
+          now ? el('button', { class: 'act', 'aria-label': `${fmtMs(s.start_ms)}부터 듣기`, onclick: () => guard(() => playMeeting(meeting, s.start_ms)) }, `${fmtMs(s.start_ms)}~${fmtMs(s.end_ms)}`) : el('span', { class: 'muted' }, `${fmtMs(s.start_ms)}~${fmtMs(s.end_ms)}`),
+          now ? el('span', {}, now.text) : el('span', { class: 'muted' }, '(지워진 녹취)')));
+      }
+    }
+  }
+  return box;
+}
+
+async function loadMissions() {
+  const isLatest = ticket('missions');
+  const status = $('#mission-filter').value;
+  const list = await api('GET', `/api/missions${status ? `?status=${status}` : ''}`);
+  const box = $('#missions'); const items = [];
+  if (!list.length) { render(box, isLatest, [el('p', { class: 'muted' }, '해당하는 작업이 없습니다.')]); return; }
+  for (const m of list.reverse()) {
+    const detail = await api('GET', `/api/missions/${m.id}`);
+    const shown = detail.preview ? (detail.preview.ok ? detail.preview.request.messages : `보낼 수 없음: ${detail.preview.error.message}`) : m.content;
+    const card = el('div', { class: 'card' },
+      el('div', { class: 'row', style: 'justify-content:space-between' }, el('strong', {}, `#${m.id} ${m.title}`), el('span', { class: `badge ${m.status}` }, STATUS[m.status] ?? m.status)),
+      el('dl', {}, el('dt', {}, '대상'), el('dd', {}, m.target), el('dt', {}, '영향'), el('dd', {}, m.impact), el('dt', {}, '내용 버전'), el('dd', {}, m.content_version.slice(0, 12))),
+      el('pre', {}, typeof shown === 'string' ? shown : JSON.stringify(shown, null, 2)),
+      m.result && m.kind.startsWith('local.') && m.kind.endsWith('.search') ? await searchResultView(m) : m.result ? el('pre', {}, `결과: ${JSON.stringify(m.result, null, 2)}`) : '',
+      m.error ? el('p', { class: 'badge failed' }, m.error) : '');
+    const row = el('div', { class: 'row' });
+    if (m.status === 'pending') {
+      row.append(el('button', { class: 'act primary', onclick: () => guard(async () => { await api('POST', `/api/missions/${m.id}/approve`, { version: m.content_version }); toast(`#${m.id} 승인함`); loadMissions(); }) }, '이 내용으로 승인'));
+      row.append(el('button', { class: 'act danger', onclick: () => guard(async () => { await api('POST', `/api/missions/${m.id}/reject`); toast(`#${m.id} 거절함`); loadMissions(); }) }, '거절'));
+    }
+    if (m.status === 'approved') {
+      row.append(el('button', { class: 'act primary', onclick: (e) => guard(async () => { e.target.disabled = true; const r = await api('POST', `/api/missions/${m.id}/run`); toast(`#${m.id} ${STATUS[r.status]}`); loadMissions(); }) }, '실행'));
+      row.append(el('button', { class: 'act', onclick: () => guard(async () => { await api('POST', `/api/missions/${m.id}/cancel`); toast(`#${m.id} 취소함`); loadMissions(); }) }, '취소'));
+    }
+    if (row.childNodes.length) card.append(row);
+    items.push(card);
+  }
+  render(box, isLatest, items);
+}
+
+async function loadQuick() {
+  const isLatest = ticket('quick'); const box = $('#quick'); const items = [];
+  for (const q of await api('GET', '/api/quick')) {
+    const input = el('input', { type: 'text', 'aria-label': `${q.name} 입력` });
+    items.push(el('div', { class: 'card' }, el('strong', {}, q.name), el('p', { class: 'muted' }, q.description),
+      el('div', { class: 'row' }, input, el('button', { class: 'act primary', onclick: () => guard(async () => {
+        const m = await api('POST', `/api/quick/${q.name}`, { params: { [q.param ?? 'text']: input.value } });
+        toast(`#${m.id} 승인 대기로 들어감`);
+      }) }, '작업 요청'))));
+  }
+  render(box, isLatest, items);
+}
+
+// 대화 탭 설정을 바꾼 횟수. 바꾸기 전에 보낸 느린 응답이 바꾼 값을 되돌리지 않게 한다.
+let chatEdits = 0;
+// 느린 응답 사이 탭을 빠르게 오가도(2026-11-14 독립 QA: 공급자 목록 5개→10개 중복) 가장 마지막 요청만 화면에 반영한다.
+// 선택한 공급자·고른 기억은 반영하는 순간의 화면 값을 지킨다(기다리는 사이 바꾼 선택을 덮지 않음).
+async function loadChat() {
+  const isLatest = ticket('chat');
+  const edits = chatEdits;
+  const [providers, voice, chatSettings, mems] = await Promise.all([api('GET', '/api/providers'), api('GET', '/api/voice'), api('GET', '/api/chat/settings'), api('GET', '/api/memories')]);
+  if (!isLatest()) return;
+  const sel = $('#chat-provider'); const keep = sel.value;
+  sel.replaceChildren(...providers.map((p) => el('option', { value: p.name }, `${p.name} — ${p.remote ? '외부' : '이 기기'}`)));
+  // 처음에는 이 기기 안 공급자를 고른다(실수로 외부에 보내지 않게).
+  sel.value = providers.some((p) => p.name === keep) ? keep : (providers.find((p) => !p.remote)?.name ?? '');
+  if (edits === chatEdits) { showVoice(voice); $('#chat-fast').checked = chatSettings.fast; $('#chat-autothink').checked = chatSettings.autoThink; }
+  const checked = new Set([...document.querySelectorAll('#chat-memories input:checked')].map((c) => Number(c.value)));
+  $('#chat-memories').replaceChildren(...(mems.length ? mems.map((m) => el('label', {}, el('input', { type: 'checkbox', value: m.id, checked: checked.has(m.id) ? '' : undefined }), m.content)) : ['기억 없음']));
+}
+const VOICE_STATE = { idle: '대기', listening: '듣는 중', thinking: '생각 중', speaking: '말하는 중' };
+// 캐릭터 얼굴(T155 잠정안, FR-003a). 상태는 화면이 아는 것(녹음 중·답 기다림)과 서버 차례 상태(/api/voice)로 정한다.
+// 말하는 동안 입은 일정한 박자로 열리고 닫힌다(음소 립싱크 아님). 움직임 줄이기 설정이면 입을 반쯤 연 채로 둔다.
+const avatarMod = import('/static/avatar.js');
+avatarMod.then((A) => { face.A = A; }).catch(() => {});
+const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false;
+const face = { look: null, name: '', voiceState: 'idle', chatPending: false, drawn: '', pollAt: 0 };
+function drawFace(box, html) { if (box.dataset.drawn !== html) { box.innerHTML = html; box.dataset.drawn = html; } }
+// 얼굴과 상태 글을 같은 상태로 한 번에 그린다(둘이 어긋나 보이지 않게).
+function refreshFace() {
+  const state = faceState();
+  if (face.A) drawFace($('#chat-avatar'), face.A.renderAvatar(face.look, state, { mouth: face.A.mouthAt(state, performance.now(), { reducedMotion }), size: 72, name: face.name || 'JARVIS' }));
+  showVoiceStatus(state);
+  return state;
+}
+async function faceTick() {
+  await avatarMod;
+  const now = performance.now();
+  const state = refreshFace();
+  // 대화 탭이 보이고 무언가 진행 중일 때만 상태를 자주 묻는다
+  const busy = state !== 'idle' || face.voiceState !== 'idle';
+  if (!$('#tab-chat').hidden && busy && now >= face.pollAt) {
+    face.pollAt = now + 400;
+    api('GET', '/api/voice').then((v) => { face.voiceState = v.state; showVoice(v); }).catch(() => {});
+  }
+}
+setInterval(() => { faceTick().catch(() => {}); }, 120);
+
+// 얼굴 고르기 + 미리 보기(저장 전). 상태 단추로 듣기·생각·말하기 모습을 미리 본다.
+function lookEditor(initial) {
+  const wrap = el('div', { class: 'look-editor' });
+  const shape = el('select', { 'aria-label': '얼굴 모양' }, ...[['circle', '동그라미'], ['rounded', '둥근 네모'], ['drop', '물방울']].map(([v, t]) => el('option', { value: v }, t)));
+  const color = el('input', { type: 'color', 'aria-label': '얼굴 색' });
+  const eyes = el('select', { 'aria-label': '눈 모양' }, ...[['round', '동그란 눈'], ['line', '선 눈'], ['dot', '점 눈']].map(([v, t]) => el('option', { value: v }, t)));
+  const preview = el('div', { class: 'look-preview', 'data-preview': '1' });
+  let state = 'idle';
+  const set = (l) => { shape.value = l.shape; color.value = l.color; eyes.value = l.eyes; };
+  const value = () => ({ shape: shape.value, color: color.value, eyes: eyes.value });
+  const states = el('div', { class: 'row' }, ...[['idle', '대기'], ['listening', '듣기'], ['thinking', '생각'], ['speaking', '말하기']]
+    .map(([s, t]) => el('button', { class: 'act', type: 'button', 'data-preview-state': s, onclick: () => { state = s; } }, t)));
+  const timer = setInterval(async () => {
+    if (!wrap.isConnected) { clearInterval(timer); return; }
+    const A = await avatarMod;
+    drawFace(preview, A.renderAvatar(value(), state, { mouth: A.mouthAt(state, performance.now(), { reducedMotion }), size: 88 }));
+  }, 120);
+  avatarMod.then((A) => set(A.normalizeLook(initial)));
+  wrap.append(el('label', {}, '얼굴 (도형으로 그린 오리지널 얼굴, 저장 전 미리 보기)'),
+    el('div', { class: 'row', style: 'align-items:center' }, preview, el('div', {}, el('div', { class: 'row' }, shape, color, eyes), states)));
+  return { el: wrap, value, reset: () => avatarMod.then((A) => set(A.normalizeLook(initial))) };
+}
+
+function showVoice(v) {
+  face.look = v.character?.look ?? null;
+  face.name = v.character?.name ?? '';
+  face.voiceState = v.state;
+  face.voice = v;
+  $('#voice-enabled').checked = v.enabled;
+  refreshFace();
+}
+// 지금 얼굴 상태(모듈을 아직 못 받았으면 서버 상태)
+function faceState() {
+  return face.A ? face.A.avatarState({ voiceState: face.voiceState, recording: Boolean(mic.recorder), chatPending: face.chatPending }) : face.voiceState;
+}
+// 상태 글은 얼굴과 같은 상태(avatarState: 녹음 중 > 서버 말하기 > 답 기다림·생성 > 듣기 > 대기)를 쓴다(2026-11-14 독립 QA 결함).
+function showVoiceStatus(state) {
+  const v = face.voice;
+  if (!v) return;
+  const text = `${v.character ? `${v.character.name} · ` : ''}소리 읽기 ${v.enabled ? '켜짐' : '꺼짐'} · 상태 ${VOICE_STATE[state] ?? state}${v.lastError ? ` · 마지막 음성 오류: ${v.lastError.message}` : ''}`;
+  const box = $('#voice-status');
+  if (box.textContent !== text) { box.textContent = text; box.dataset.state = state; }
+}
+async function sendChat() {
+  const question = $('#chat-question').value;
+  const memoryIds = [...document.querySelectorAll('#chat-memories input:checked')].map((c) => Number(c.value));
+  const out = $('#chat-out'); const btn = $('#chat-send'); btn.disabled = true;
+  face.chatPending = true;
+  refreshFace();
+  try {
+    const r = await api('POST', '/api/chat', { provider: $('#chat-provider').value, question, memoryIds });
+    out.prepend(r.status === 'sent'
+      ? el('div', { class: 'card' }, el('p', { class: 'muted' }, question), r.thinking?.mode === 'auto-think' ? el('p', { class: 'muted' }, '(계산·추론 질문이라 생각해서 답함: ' + r.thinking.reason + ')') : '', r.reply.discarded ? '' : el('p', {}, r.reply.text), r.reply.finishReason === 'interrupted' ? el('p', { class: 'muted' }, '(중간에 멈춰서 이 답은 버렸습니다)') : '')
+      : el('div', { class: 'card' }, el('p', {}, `외부 전송이라 승인이 필요합니다: 작업 #${r.mission.id}. "승인 대기" 탭에서 보낼 내용을 확인하세요.`)));
+  } catch (e) { toast(`보내지 못함: ${e.message}`); } finally {
+    btn.disabled = false;
+    face.chatPending = false;
+    refreshFace();
+    face.pollAt = 0; // 답이 오면 바로 상태(말하기·대기)를 다시 묻는다
+    api('GET', '/api/voice').then(showVoice).catch(() => {});
+  }
+}
+
+async function loadMemories() {
+  const isLatest = ticket('memories');
+  const q = $('#mem-search').value.trim();
+  const list = await api('GET', `/api/memories${q ? `?q=${encodeURIComponent(q)}` : ''}`);
+  const box = $('#memories'); const items = [];
+  if (!list.length) { render(box, isLatest, [el('p', { class: 'muted' }, q ? '찾는 기억이 없습니다.' : '저장된 기억이 없습니다. 위에서 추가하세요.')]); return; }
+  for (const m of list) {
+    const text = el('input', { type: 'text', value: m.content, 'aria-label': `기억 ${m.id} 내용` });
+    const tags = el('input', { type: 'text', value: m.tags.join(', '), 'aria-label': `기억 ${m.id} 태그(쉼표로 구분)`, placeholder: '태그 (쉼표로 구분)' });
+    items.push(el('div', { class: 'card' }, text, tags,
+      el('p', { class: 'muted' }, `수정 ${new Date(m.updated_at).toLocaleString('ko-KR')}`),
+      el('div', { class: 'row' },
+        el('button', { class: 'act', onclick: () => guard(async () => {
+          const nextTags = tags.value.split(',').map((x) => x.trim()).filter(Boolean);
+          await api('PUT', `/api/memories/${m.id}`, { content: text.value, tags: nextTags }); toast('수정함'); loadMemories();
+        }) }, '수정 저장'),
+        el('button', { class: 'act danger', onclick: () => guard(async () => {
+          if (!confirm(`기억 "${m.content}"을(를) 지울까요? 되돌릴 수 없습니다.`)) return;
+          await api('DELETE', `/api/memories/${m.id}`); toast('지움'); loadMemories();
+        }) }, '기억 지우기'))));
+  }
+  render(box, isLatest, items);
+}
+
+async function loadMeetings() {
+  const isLatest = ticket('meetings'); const box = $('#meetings'); const items = [];
+  const list = await api('GET', '/api/meetings');
+  if (!list.length) { render(box, isLatest, [el('p', { class: 'muted' }, '저장된 회의가 없습니다.')]); return; }
+  for (const m of list) {
+    const segs = await api('GET', `/api/meetings/${m.id}/segments`);
+    const fmt = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+    // 시간을 누르면 그 구간부터 원음을 재생한다
+    const lines = segs.length
+      ? segs.map((s) => el('div', { class: 'row', 'data-seg': s.id },
+        el('button', { class: 'act', 'aria-label': `${fmt(s.start_ms)}부터 듣기`, onclick: () => guard(() => playMeeting(m, s.start_ms)) }, fmt(s.start_ms)),
+        el('span', {}, s.text)))
+      : [el('p', { class: 'muted' }, '녹취 없음')];
+    items.push(el('div', { class: 'card', 'data-meeting': m.id }, el('strong', {}, `${m.title}`), el('span', { class: 'muted' }, ` · ${STATUS[m.status] ?? m.status}${m.duration_ms ? ` · ${fmt(m.duration_ms)}` : ''}`),
+      el('div', {}, ...lines),
+      m.status !== 'recording' ? el('button', { class: 'act danger', onclick: () => guard(async () => {
+        if (!confirm(`회의 "${m.title}"의 원음과 녹취를 모두 지울까요? 되돌릴 수 없습니다.`)) return;
+        await api('DELETE', `/api/meetings/${m.id}`); clearMeetingAudio(m.id); toast('회의를 지움'); loadMeetings(); refreshMeetingSearch();
+      }) }, '회의 지우기')
+        // 화면을 닫거나 새로 고쳐 끊긴 녹음: 그때까지 받은 원음으로 마무리한다
+        : meetRec.id !== m.id ? el('button', { class: 'act', onclick: () => guard(async () => {
+          await api('POST', `/api/meetings/${m.id}/stop`); toast('끊긴 녹음을 마무리함'); loadMeetings();
+        }) }, '끊긴 녹음 마무리') : ''));
+  }
+  render(box, isLatest, items);
+}
+
+// 회의 원음을 토큰과 함께 받아 브라우저 안에서만 재생한다. 같은 회의·같은 수정 시각이면 다시 받지 않는다.
+// 회의를 지우면 재생을 멈추고 사본(blob URL)을 지운다(FR-008c). 녹음이 이어져 원음이 바뀌면(updated_at) 다시 받는다.
+const meetAudio = { id: null, key: null, url: null };
+function clearMeetingAudio(id) {
+  if (id !== undefined && meetAudio.id !== id) return false;
+  const audio = $('#meet-audio');
+  audio.pause();
+  audio.removeAttribute('src');
+  audio.load();
+  audio.hidden = true;
+  if (meetAudio.url) URL.revokeObjectURL(meetAudio.url);
+  Object.assign(meetAudio, { id: null, key: null, url: null });
+  return true;
+}
+async function playMeeting(m, ms) {
+  const audio = $('#meet-audio');
+  const key = `${m.id}:${m.updated_at}`;
+  if (meetAudio.key !== key) {
+    const res = await fetch(`/api/meetings/${m.id}/audio`, { headers: { 'x-jarvis-token': TOKEN } });
+    if (!res.ok) throw new Error((await res.json()).error?.message ?? '원음을 불러오지 못함');
+    const blob = await res.blob();
+    clearMeetingAudio();
+    Object.assign(meetAudio, { id: m.id, key, url: URL.createObjectURL(blob) });
+    audio.src = meetAudio.url;
+    await new Promise((resolve, reject) => { audio.onloadedmetadata = resolve; audio.onerror = () => reject(new Error('원음을 재생할 수 없음')); });
+  }
+  audio.hidden = false;
+  audio.currentTime = ms / 1000;
+  await audio.play();
+}
+
+// 회의록 검색(FR-008a). 결과는 회의별로 묶어 시간 구간을 보이고, 시간을 누르면 그 위치부터 재생한다.
+// 검색어를 빠르게 바꿔도 가장 마지막 검색만 화면에 반영한다(늦게 온 옛 결과가 덮지 않게, 2026-11-14 실제 실행 QA).
+async function searchMeetings() {
+  const isLatest = ticket('meetSearch');
+  const q = $('#meet-search').value.trim();
+  const box = $('#meet-search-results');
+  const status = $('#meet-search-status');
+  if (!q) { box.replaceChildren(); status.textContent = '검색어를 넣으세요.'; return; }
+  let r;
+  try {
+    r = await api('GET', `/api/meetings/search?q=${encodeURIComponent(q)}`);
+  } catch (e) {
+    // 옛 검색의 실패는 무시하고, 지금 검색의 실패는 옛 결과를 지운 뒤 보인다(검색어와 결과가 어긋나지 않게).
+    if (!isLatest()) return;
+    box.replaceChildren();
+    status.textContent = `찾지 못함: ${e.message}`;
+    return;
+  }
+  if (!isLatest()) return;
+  const fmt = (ms) => fmtMs(ms);
+  status.textContent = r.results.length
+    ? `"${r.query}": 회의 ${r.results.length}개, 녹취 구간 ${r.segmentCount}개${r.truncated ? ' (많아서 일부만 보임)' : ''}`
+    : `"${r.query}"와 맞는 회의가 없습니다.`;
+  box.replaceChildren(...r.results.map((x) => el('div', { class: 'card', 'data-search-meeting': x.meeting.id },
+    el('strong', {}, x.meeting.title), el('span', { class: 'muted' }, ` · ${STATUS[x.meeting.status] ?? x.meeting.status}${x.titleMatch ? ' · 제목이 맞음' : ''}`),
+    ...x.segments.map((s) => el('div', { class: 'row', 'data-search-seg': s.id },
+      el('button', { class: 'act', 'aria-label': `${fmt(s.start_ms)}부터 듣기`, onclick: () => guard(() => playMeeting(x.meeting, s.start_ms)) }, `${fmt(s.start_ms)}~${fmt(s.end_ms)}`),
+      el('span', {}, s.text))))));
+}
+// 회의를 지운 뒤 보이던 검색 결과를 다시 찾아 지운 회의가 남지 않게 한다
+// 검색 응답을 기다리는 중(결과가 아직 없음)이어도 다시 찾는다. 새 검색이 늦게 올 옛 결과를 무효로 만든다(2026-11-14 독립 QA).
+function refreshMeetingSearch() { if ($('#meet-search').value.trim() && generation.meetSearch) guard(searchMeetings); }
+$('#meet-search-btn').addEventListener('click', () => guard(searchMeetings));
+$('#meet-search').addEventListener('keydown', (e) => { if (e.key === 'Enter') guard(searchMeetings); });
+
+$('#meet-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const status = $('#meet-status');
+  status.textContent = '받아 적는 중… 긴 회의는 시간이 걸립니다.';
+  try {
+    const title = $('#meet-title').value.trim();
+    const res = await fetch(`/api/meetings/import${title ? `?title=${encodeURIComponent(title)}` : ''}`, { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': file.type || 'application/octet-stream' }, body: file });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error?.message ?? '가져오기 실패');
+    status.textContent = `회의록을 만들었습니다: 구간 ${data.segments.length}개, 받아쓰기 ${data.ms}ms${data.broken ? ' · 일부 글자가 깨졌을 수 있음' : ''}.`;
+    $('#meet-title').value = '';
+    loadMeetings();
+  } catch (err) {
+    status.textContent = `가져오지 못함: ${err.message}`;
+  } finally {
+    e.target.value = '';
+  }
+});
+
+// 회의 마이크 녹음(T123). 소리를 조용한 틈에서 15~30초 조각으로 나눠 16kHz WAV로 차례로 보낸다.
+// 서버는 조각을 받자마자 원음 파일 뒤에 붙이고(화면이 꺼져도 그때까지 원음이 남음) 이 기기 안에서 받아 적는다.
+const MEET_CHUNK_MIN_MS = 15000;
+const MEET_CHUNK_MAX_MS = 30000;
+const MEET_MAX_MS = 2 * 60 * 60 * 1000;
+const meetRec = { id: null, stream: null, ctx: null, proc: null, cap: null, seg: null, analyser: null, buf: null, timer: null, startedAt: 0, queue: Promise.resolve(), seq: 0, sent: 0, failed: 0, segs: 0 };
+const fmtMs = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
+function meetUi(recording) {
+  $('#meet-rec-indicator').hidden = !recording;
+  $('#meet-rec').textContent = recording ? '회의 녹음 끝내기' : '마이크로 회의 녹음 시작';
+  $('#meet-rec').setAttribute('aria-pressed', String(recording));
+  $('#meet-file').disabled = recording;
+}
+// 조각마다 번호(seq)를 붙인다. 응답이 사라져 다시 보낼 때도 같은 번호·같은 내용을 보내 서버가 한 번만 붙이게 한다(FR-008b).
+async function sendMeetChunk(id, wav, seq) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const res = await fetch(`/api/meetings/${id}/chunk?seq=${seq}`, { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': 'audio/wav' }, body: new Blob([wav], { type: 'audio/wav' }) });
+      const data = await res.json();
+      if (!res.ok) {
+        const err = new Error(data.error?.message ?? '조각 저장 실패');
+        err.final = res.status === 400 || res.status === 404 || res.status === 409; // 다시 보내도 안 되는 오류
+        throw err;
+      }
+      meetRec.sent += 1;
+      for (const s of data.segments) {
+        meetRec.segs += 1;
+        $('#meet-live').append(el('div', { class: 'row' }, el('span', { class: 'muted' }, fmtMs(s.start_ms)), el('span', {}, s.text)));
+      }
+      if (data.sttError) $('#meet-status').textContent = `일부 받아 적기 실패(원음은 저장함): ${data.sttError}`;
+      return;
+    } catch (err) {
+      if (err.final || attempt >= 3) {
+        meetRec.failed += 1;
+        $('#meet-status').textContent = `녹음 조각을 저장하지 못함: ${err.message}`;
+        if (err.final && meetRec.id === id && meetRec.timer) stopMeetingRecording(); // 최대 길이 등: 녹음을 끝낸다
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+  }
+}
+function flushMeetChunk() {
+  if (!meetRec.cap || meetRec.cap.recordedMs === 0) return;
+  const wav = meetRec.cap.stop();
+  meetRec.cap.start({ preRoll: false }); // 같은 순간에 다시 시작해 조각 사이에 빠지는 소리가 없다
+  const id = meetRec.id;
+  const seq = meetRec.seq;
+  meetRec.seq += 1;
+  meetRec.queue = meetRec.queue.then(() => sendMeetChunk(id, wav, seq));
+}
+function meetTick() {
+  if (!meetRec.analyser) return;
+  meetRec.analyser.getFloatTimeDomainData(meetRec.buf);
+  meetRec.seg.push(vad.rmsOf(meetRec.buf), performance.now());
+  const elapsed = performance.now() - meetRec.startedAt;
+  $('#meet-rec-time').textContent = fmtMs(elapsed);
+  if (elapsed >= MEET_MAX_MS) { stopMeetingRecording(); return; }
+  const len = meetRec.cap.recordedMs;
+  if (len >= MEET_CHUNK_MAX_MS || (len >= MEET_CHUNK_MIN_MS && !meetRec.seg.speaking)) flushMeetChunk();
+}
+async function startMeetingRecording() {
+  vad ??= await import('/static/voice-input.js');
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('이 브라우저는 마이크를 쓸 수 없음');
+  // 대화 탭 마이크(듣기 모드)가 회의 말에 반응하지 않게 끈다
+  if (mic.stream) { closeMic(); $('#mic-listen').checked = false; micUi(false, '회의 녹음 중이라 듣기 모드를 껐습니다.'); }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    throw new Error(micErrorText(e));
+  }
+  let m;
+  try {
+    const title = $('#meet-title').value.trim();
+    m = await api('POST', '/api/meetings/live', title ? { title } : {});
+  } catch (e) {
+    stream.getTracks().forEach((t) => t.stop());
+    throw e;
+  }
+  const ctx = new AudioContext();
+  const source = ctx.createMediaStreamSource(stream);
+  const analyser = ctx.createAnalyser();
+  analyser.fftSize = 1024;
+  source.connect(analyser);
+  const cap = vad.createPcmCapture({ inputRate: ctx.sampleRate, maxMs: MEET_CHUNK_MAX_MS + 5000 });
+  const proc = ctx.createScriptProcessor(4096, 1, 1);
+  proc.onaudioprocess = (e) => cap.push(e.inputBuffer.getChannelData(0));
+  const mute = ctx.createGain(); // 소리 0으로만 출력에 잇는다(소리를 내지 않음)
+  mute.gain.value = 0;
+  source.connect(proc); proc.connect(mute); mute.connect(ctx.destination);
+  cap.start({ preRoll: false });
+  Object.assign(meetRec, { id: m.id, stream, ctx, proc, cap, analyser, buf: new Float32Array(analyser.fftSize), seg: vad.createSegmenter({ endSilenceMs: 300, maxMs: Infinity }), startedAt: performance.now(), queue: Promise.resolve(), seq: 0, sent: 0, failed: 0, segs: 0 });
+  stream.getAudioTracks().forEach((tr) => { tr.onended = () => { $('#meet-status').textContent = '마이크 연결이 끊겨 녹음을 끝냅니다.'; stopMeetingRecording(); }; });
+  meetRec.timer = setInterval(meetTick, 100);
+  $('#meet-live').replaceChildren();
+  $('#meet-status').textContent = `"${m.title}" 녹음 중. 말한 내용이 15~30초마다 아래에 적힙니다.`;
+  meetUi(true);
+  loadMeetings();
+}
+async function stopMeetingRecording() {
+  if (!meetRec.timer) return;
+  clearInterval(meetRec.timer);
+  meetRec.timer = null;
+  flushMeetChunk();
+  meetRec.proc.onaudioprocess = null;
+  meetRec.stream.getTracks().forEach((t) => t.stop());
+  meetRec.ctx.close();
+  meetUi(false);
+  const id = meetRec.id;
+  $('#meet-status').textContent = '남은 녹음을 저장하고 받아 적는 중…';
+  await meetRec.queue;
+  try {
+    const r = await api('POST', `/api/meetings/${id}/stop`);
+    $('#meet-status').textContent = r.empty
+      ? '녹음된 소리가 없어 회의를 만들지 않았습니다.'
+      : `회의록을 저장했습니다: ${fmtMs(r.meeting.duration_ms)}, 구간 ${r.segments.length}개${meetRec.failed ? `, 저장 못 한 조각 ${meetRec.failed}개` : ''}.`;
+  } finally {
+    Object.assign(meetRec, { id: null, stream: null, ctx: null, proc: null, cap: null, analyser: null, seg: null });
+    $('#meet-title').value = '';
+    loadMeetings();
+  }
+}
+$('#meet-rec').addEventListener('click', () => guard(async () => {
+  if (meetRec.timer) await stopMeetingRecording();
+  else if (!meetRec.id) await startMeetingRecording();
+}));
+window.addEventListener('beforeunload', (e) => { if (meetRec.timer) { e.preventDefault(); e.returnValue = ''; } });
+
+// 캐릭터 카드의 작은 얼굴(대기 모습)
+function faceOf(c) {
+  const box = el('div', { 'data-face': c.id });
+  avatarMod.then((A) => drawFace(box, A.renderAvatar(c.look, 'idle', { size: 44, name: c.name })));
+  return box;
+}
+async function loadCharacters() {
+  const isLatest = ticket('characters');
+  const [list, voices] = await Promise.all([api('GET', '/api/characters'), api('GET', '/api/voices').catch(() => [])]);
+  if (!isLatest()) return; // 느린 옛 응답이 목록·적용 표시를 덮지 않게(대화 탭과 같은 결함 유형)
+  const sel = $('#char-voice'); const keep = sel.value;
+  sel.replaceChildren(el('option', { value: '' }, '기본 목소리'), ...voices.map((v) => el('option', { value: v.name }, `${v.name} (${v.culture})`)));
+  sel.value = keep;
+  const active = list.find((c) => c.active);
+  $('#char-active').textContent = active ? `적용 중: ${active.name}` : '적용 중인 캐릭터 없음 (기본 말투)';
+  const box = $('#characters');
+  if (!list.length) { render(box, isLatest, [el('p', { class: 'muted' }, '저장된 캐릭터가 없습니다. 위에서 만드세요.')]); return; }
+  render(box, isLatest, list.map((c) => el('div', { class: 'card', 'data-character': c.id },
+    el('div', { class: 'row', style: 'justify-content:space-between' }, el('div', { class: 'row', style: 'align-items:center' }, faceOf(c), el('strong', {}, c.name)), c.active ? el('span', { class: 'badge done' }, '적용 중') : ''),
+    el('p', {}, c.persona),
+    el('p', { class: 'muted' }, `목소리: ${c.voice ?? '기본'}`),
+    c.assets.length ? el('pre', {}, c.assets.map((a) => `${a.name} · 출처 ${a.source} · 이용 조건 ${a.license}`).join('\n')) : '',
+    el('div', { class: 'row' },
+      c.active
+        ? el('button', { class: 'act', onclick: () => guard(async () => { await api('POST', '/api/characters/deactivate'); toast('적용 해제'); loadCharacters(); }) }, '적용 해제')
+        : el('button', { class: 'act primary', onclick: () => guard(async () => { await api('POST', `/api/characters/${c.id}/activate`); toast(`${c.name} 적용`); loadCharacters(); }) }, '이 캐릭터 적용'),
+      el('button', { class: 'act', onclick: (e) => editCharacter(e.target.closest('.card'), c, voices) }, '캐릭터 수정'),
+      el('button', { class: 'act', onclick: (e) => guard(async () => { e.target.disabled = true; try { await api('POST', `/api/characters/${c.id}/preview`); } finally { e.target.disabled = false; } }) }, '목소리 미리 듣기'),
+      el('button', { class: 'act danger', onclick: () => guard(async () => {
+        if (!confirm(`캐릭터 "${c.name}"을(를) 지울까요? 되돌릴 수 없습니다.`)) return;
+        await api('DELETE', `/api/characters/${c.id}`); toast('캐릭터를 지움'); loadCharacters();
+      }) }, '캐릭터 지우기')))));
+}
+
+// 캐릭터 카드를 그 자리에서 수정 양식으로 바꾼다. 저장하면 서버 검사(빈 값·자산 출처/이용 조건·비밀)를 그대로 따른다.
+function editCharacter(card, c, voices) {
+  const name = el('input', { type: 'text', value: c.name, 'aria-label': '이름' });
+  const persona = el('textarea', { 'aria-label': '성격·말투' }, c.persona);
+  const voice = el('select', { 'aria-label': '목소리' }, el('option', { value: '' }, '기본 목소리'),
+    ...voices.map((v) => el('option', { value: v.name }, `${v.name} (${v.culture})`)));
+  voice.value = c.voice ?? '';
+  const assetBox = el('div', {});
+  const assetRow = (a = { name: '', source: '', license: '' }) => {
+    const row = el('div', { class: 'row', 'data-asset': '1' },
+      el('input', { type: 'text', value: a.name, placeholder: '이름', 'aria-label': '자산 이름', style: 'flex:1' }),
+      el('input', { type: 'text', value: a.source, placeholder: '출처', 'aria-label': '자산 출처', style: 'flex:1' }),
+      el('input', { type: 'text', value: a.license, placeholder: '이용 조건', 'aria-label': '자산 이용 조건', style: 'flex:1' }));
+    row.append(el('button', { class: 'act', onclick: () => row.remove() }, '자산 빼기'));
+    assetBox.append(row);
+  };
+  c.assets.forEach(assetRow);
+  const look = lookEditor(c.look);
+  const save = el('button', { class: 'act primary', onclick: () => guard(async () => {
+    const assets = [...assetBox.querySelectorAll('[data-asset]')]
+      .map((r) => [...r.querySelectorAll('input')].map((i) => i.value.trim()))
+      .filter((v) => v.some(Boolean))
+      .map(([n, s, l]) => ({ name: n, source: s, license: l }));
+    await api('PUT', `/api/characters/${c.id}`, { name: name.value, persona: persona.value, voice: voice.value || null, assets, look: look.value() });
+    toast('캐릭터를 수정함'); loadCharacters();
+  }) }, '수정 저장');
+  card.replaceChildren(
+    el('label', {}, '이름'), name, el('label', {}, '성격·말투'), persona, el('label', {}, '목소리'), voice, look.el,
+    el('label', {}, '자산 (출처와 이용 조건 필수)'), assetBox,
+    el('div', { class: 'row', style: 'margin-top:8px' }, el('button', { class: 'act', onclick: () => assetRow() }, '자산 줄 추가'), save,
+      el('button', { class: 'act', onclick: () => guard(loadCharacters) }, '수정 취소')));
+  name.focus();
+}
+
+const loaders = { missions: loadMissions, quick: loadQuick, chat: loadChat, memory: loadMemories, meetings: loadMeetings, characters: loadCharacters };
+function show(tab) {
+  for (const b of document.querySelectorAll('nav button')) b.setAttribute('aria-selected', String(b.dataset.tab === tab));
+  for (const s of document.querySelectorAll('main section')) s.hidden = s.id !== `tab-${tab}`;
+  guard(loaders[tab]);
+}
+for (const b of document.querySelectorAll('nav button')) b.addEventListener('click', () => show(b.dataset.tab));
+$('#mission-filter').addEventListener('change', () => guard(loadMissions));
+$('#chat-send').addEventListener('click', sendChat);
+$('#chat-fast').addEventListener('change', (e) => guard(async () => { chatEdits += 1; const r = await api('PUT', '/api/chat/settings', { fast: e.target.checked }); e.target.checked = r.fast; toast(r.fast ? '빠른 답 켬' : '빠른 답 끔'); }));
+$('#chat-autothink').addEventListener('change', (e) => guard(async () => { chatEdits += 1; const r = await api('PUT', '/api/chat/settings', { autoThink: e.target.checked }); e.target.checked = r.autoThink; toast(r.autoThink ? '계산·추론 질문 자동 생각 켬' : '자동 생각 끔'); }));
+// 음성(파일·녹음)을 이 기기 안에서 받아 적어 질문 칸에 넣는다. autoSend면 바로 보낸다.
+async function sttRequest(blob, echo = false) {
+  const res = await fetch(echo ? '/api/stt?echo=check' : '/api/stt', { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': blob.type || 'application/octet-stream' }, body: blob });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message ?? '받아쓰기 실패');
+  return data;
+}
+// echo: 듣기 모드에서 JARVIS가 말하는 중에 녹음한 것. 방금 읽은 글과 같으면 무시하고, 다르면 읽던 답을 멈춘 뒤 넣는다.
+async function transcribeAudio(blob, status, autoSend = false, { echo = false } = {}) {
+  status.textContent = '받아 적는 중… (처음 한 번은 엔진 준비로 몇 초 걸림)';
+  try {
+    const data = await sttRequest(blob, echo);
+    if (echo && data.echo) { ignoreEcho(); return; }
+    if (echo) voiceStop();
+    if (!data.text) { status.textContent = '말소리를 찾지 못했습니다.'; return; }
+    const q = $('#chat-question');
+    q.value = q.value ? `${q.value} ${data.text}` : data.text;
+    status.textContent = `받아 적음: ${data.seconds}초 음성, ${data.ms}ms${data.broken ? ' · 일부 글자가 깨졌을 수 있음' : ''}.${autoSend ? '' : ' 확인 후 "질문 보내기"를 누르세요.'}`;
+    if (autoSend) await sendChat();
+  } catch (err) {
+    status.textContent = `받아 적지 못함: ${err.message}`;
+  }
+}
+$('#stt-file').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  try { await transcribeAudio(file, $('#stt-status')); } finally { e.target.value = ''; }
+});
+
+// 마이크 입력. 말하기 버튼(누르면 녹음, 말이 끝나 조용해지면 자동 멈춤) 또는 듣기 모드(말소리 감지로 자동 녹음).
+// 녹음을 시작하면 읽던 답을 멈춘다(끼어들기). 녹음이 끝나면(듣기 모드가 아니면) 마이크를 놓는다.
+let vad = null;
+const mic = { stream: null, ctx: null, analyser: null, buf: null, timer: null, recorder: null, cap: null, proc: null, seg: null, mode: null, startedAt: 0, heard: false };
+function micUi(recording, text) {
+  $('#mic-indicator').hidden = !recording;
+  $('#mic-btn').textContent = recording ? '말하기 끝' : '말하기';
+  $('#mic-btn').setAttribute('aria-pressed', String(recording));
+  if (text !== undefined) $('#mic-status').textContent = text;
+}
+// 권한 거부·장치 없음·사용 중을 알아듣기 쉽게 알린다(US1).
+function micErrorText(e) {
+  return {
+    NotAllowedError: '마이크 사용이 거부됨. 브라우저 주소창의 권한에서 마이크를 허용한 뒤 다시 누르세요.',
+    NotFoundError: '마이크를 찾지 못함. 마이크를 연결한 뒤 다시 누르세요.',
+    NotReadableError: '마이크를 다른 프로그램이 쓰고 있음. 그 프로그램을 끈 뒤 다시 누르세요.',
+  }[e.name] ?? `마이크를 열 수 없음: ${e.message}`;
+}
+async function openMic(mode) {
+  vad ??= await import('/static/voice-input.js');
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('이 브라우저는 마이크를 쓸 수 없음');
+  try {
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    const why = micErrorText(e);
+    micUi(false, why);
+    throw new Error(why);
+  }
+  // 녹음 도중 마이크가 빠지면 멈추고 알린다
+  mic.stream.getAudioTracks().forEach((tr) => { tr.onended = () => { closeMic(); micUi(false, '마이크 연결이 끊겼습니다. 다시 연결한 뒤 누르세요.'); }; });
+  mic.ctx = new AudioContext();
+  mic.analyser = mic.ctx.createAnalyser();
+  mic.analyser.fftSize = 1024;
+  const source = mic.ctx.createMediaStreamSource(mic.stream);
+  source.connect(mic.analyser);
+  mic.buf = new Float32Array(mic.analyser.fftSize);
+  // 녹음 앞부분 잘림 대책(T232): 마이크 소리를 늘 짧게 미리 담는다. 처리 노드는 소리 0(gain 0)으로만 출력에 이어 소리를 내지 않는다.
+  mic.cap = vad.createPcmCapture({ inputRate: mic.ctx.sampleRate });
+  mic.proc = mic.ctx.createScriptProcessor(4096, 1, 1);
+  mic.proc.onaudioprocess = (e) => mic.cap?.push(e.inputBuffer.getChannelData(0));
+  const mute = mic.ctx.createGain();
+  mute.gain.value = 0;
+  source.connect(mic.proc);
+  mic.proc.connect(mute);
+  mute.connect(mic.ctx.destination);
+  mic.seg = vad.createSegmenter();
+  mic.mode = mode;
+  mic.timer = setInterval(micTick, 50);
+}
+function closeMic() {
+  clearInterval(mic.timer);
+  if (mic.recorder && mic.recorder.state !== 'inactive') mic.recorder.stop();
+  mic.stream?.getTracks().forEach((t) => t.stop());
+  if (mic.proc) mic.proc.onaudioprocess = null;
+  mic.ctx?.close();
+  Object.assign(mic, { stream: null, ctx: null, analyser: null, timer: null, mode: null, cap: null, proc: null });
+  micUi(false);
+}
+// 듣기 모드 에코 대책(T219). OS 음성 합성은 브라우저 밖에서 소리를 내서 브라우저 에코 제거가 지우지 못한다.
+// JARVIS가 말하는 중에 소리가 들리면 바로 끊지 않고, 처음 1.5초를 받아 적어 방금 읽은 글과 비교한다.
+// 같으면(에코) 그 녹음을 버리고, 다르면 사용자 말로 보고 읽던 답을 멈춘 뒤 계속 녹음한다. 말하기 버튼은 늘 바로 멈춘다.
+const ECHO_PROBE_MS = 1500;
+const ECHO_COOLDOWN_MS = 1000;
+function voiceStop() { api('POST', '/api/voice/stop').catch(() => {}); }
+function ignoreEcho() {
+  mic.ignoreUntil = performance.now() + ECHO_COOLDOWN_MS;
+  mic.seg?.reset();
+  $('#mic-status').textContent = '읽는 답 소리로 보여 무시함. 계속 듣는 중…';
+}
+async function runEchoProbe(rec) {
+  if (mic.recorder !== rec || mic.probe?.state !== 'pending') return;
+  mic.probe.state = 'probing';
+  try {
+    const d = await sttRequest(new Blob([mic.cap.wav()], { type: 'audio/wav' }), true);
+    if (mic.recorder !== rec) return; // 그사이 녹음이 끝났으면 끝난 쪽에서 판단한다
+    if (d.echo) { mic.discard = true; rec.stop(); return; }
+  } catch { /* 판단 실패면 사용자 말로 본다(끼어들기를 막지 않음) */ }
+  if (mic.recorder !== rec) return;
+  mic.probe = { state: 'user' };
+  voiceStop();
+  micUi(true, '녹음 중… 말이 끝나면 자동으로 멈춥니다.');
+}
+// 녹음은 미리 담기(mic.cap)에서 바로 16kHz WAV로 만든다. 듣기 모드는 말 시작을 알아채기 전 소리(최대 0.8초)도 넣는다(T232).
+const MIN_RECORD_MS = 300;
+function startRecording({ listen = false } = {}) {
+  mic.heard = false;
+  mic.probe = null;
+  mic.discard = false;
+  mic.startedAt = performance.now();
+  const cap = mic.cap;
+  const rec = {
+    state: 'recording',
+    stop() {
+      if (rec.state === 'inactive') return;
+      rec.state = 'inactive';
+      onstop();
+    },
+  };
+  mic.recorder = rec;
+  const onstop = async () => {
+    const ms = cap.recordedMs;
+    const blob = new Blob([cap.stop()], { type: 'audio/wav' });
+    const echo = Boolean(mic.probe) && mic.probe.state !== 'user';
+    const discard = mic.discard;
+    Object.assign(mic, { recorder: null, probe: null, discard: false });
+    micUi(false);
+    if (mic.mode !== 'listen') closeMic();
+    if (discard) { ignoreEcho(); return; }
+    if (ms < MIN_RECORD_MS) { $('#mic-status').textContent = '녹음이 너무 짧습니다.'; return; }
+    await transcribeAudio(blob, $('#mic-status'), $('#mic-autosend').checked, { echo });
+  };
+  cap.start({ preRoll: listen });
+  micUi(true, '녹음 중… 말이 끝나면 자동으로 멈춥니다.');
+  if (!listen) { voiceStop(); return; } // 끼어들기: 읽던 답을 멈춘다
+  mic.probe = { state: 'checking' };
+  api('GET', '/api/voice').then((v) => {
+    if (mic.recorder !== rec) return;
+    if (v.state !== 'speaking') { mic.probe = null; voiceStop(); return; }
+    mic.probe = { state: 'pending' };
+    micUi(true, '녹음 중… (읽는 답 소리인지 확인 중)');
+    setTimeout(() => runEchoProbe(rec), ECHO_PROBE_MS);
+  }).catch(() => { if (mic.recorder === rec) { mic.probe = null; voiceStop(); } });
+}
+function micTick() {
+  if (!mic.analyser) return;
+  mic.analyser.getFloatTimeDomainData(mic.buf);
+  const ev = mic.seg.push(vad.rmsOf(mic.buf), performance.now());
+  const recording = Boolean(mic.recorder);
+  if (ev === 'start') {
+    mic.heard = true;
+    if (!recording && mic.mode === 'listen' && performance.now() >= (mic.ignoreUntil ?? 0)) startRecording({ listen: true });
+  } else if (ev === 'end' && recording) {
+    mic.recorder.stop();
+  } else if (recording && !mic.heard && performance.now() - mic.startedAt > 8000) {
+    mic.recorder.stop(); // 8초 동안 말소리가 없으면 멈춤
+  }
+}
+$('#mic-btn').addEventListener('click', () => guard(async () => {
+  if (mic.recorder) { mic.recorder.stop(); return; }
+  if (meetRec.timer) throw new Error('회의 녹음 중에는 말하기를 쓸 수 없음');
+  if (!mic.stream) await openMic('ptt');
+  mic.seg.reset();
+  startRecording();
+}));
+$('#mic-listen').addEventListener('change', (e) => guard(async () => {
+  if (e.target.checked) {
+    if (meetRec.timer) { e.target.checked = false; throw new Error('회의 녹음 중에는 듣기 모드를 쓸 수 없음'); }
+    if (mic.stream) closeMic();
+    try { await openMic('listen'); micUi(false, '듣는 중… 말하면 자동으로 녹음합니다.'); } catch (err) { e.target.checked = false; throw err; }
+  } else {
+    closeMic();
+    micUi(false, '듣기 모드 꺼짐');
+  }
+}));
+$('#voice-enabled').addEventListener('change', (e) => guard(async () => { chatEdits += 1; showVoice(await api('PUT', '/api/voice', { enabled: e.target.checked })); }));
+$('#voice-stop').addEventListener('click', () => guard(async () => { const r = await api('POST', '/api/voice/stop'); showVoice(r); toast(r.stopped || r.stoppedChats ? '답을 멈춤' : '멈출 답이 없음'); }));
+$('#mem-add').addEventListener('click', () => guard(async () => {
+  const tags = $('#mem-tags').value.split(',').map((t) => t.trim()).filter(Boolean);
+  await api('POST', '/api/memories', { content: $('#mem-content').value, tags });
+  $('#mem-content').value = ''; $('#mem-tags').value = ''; toast('기억을 저장함'); loadMemories();
+}));
+$('#mem-search').addEventListener('input', () => guard(loadMemories));
+// 새 캐릭터 양식의 얼굴 고르기
+let newLook = lookEditor(null);
+$('#char-look').replaceChildren(newLook.el);
+$('#char-add').addEventListener('click', () => guard(async () => {
+  const asset = { name: $('#asset-name').value.trim(), source: $('#asset-source').value.trim(), license: $('#asset-license').value.trim() };
+  const anyAsset = asset.name || asset.source || asset.license;
+  await api('POST', '/api/characters', { name: $('#char-name').value, persona: $('#char-persona').value, voice: $('#char-voice').value || null, assets: anyAsset ? [asset] : [], look: newLook.value() });
+  newLook = lookEditor(null); $('#char-look').replaceChildren(newLook.el);
+  for (const id of ['#char-name', '#char-persona', '#asset-name', '#asset-source', '#asset-license']) $(id).value = '';
+  toast('캐릭터를 저장함'); loadCharacters();
+}));
+guard(async () => {
+  const info = await api('GET', '/api/info');
+  $('#info').textContent = `${info.platform === 'win32' ? 'Windows' : info.platform === 'darwin' ? 'macOS' : info.platform} · Node ${info.node} · 이 기기 전용`;
+});
+show('missions');
+</script>
+</body>
+</html>

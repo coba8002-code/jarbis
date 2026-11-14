@@ -1,0 +1,172 @@
+// 앱 조립: DB와 각 기능을 한 곳에서 만든다. Windows·macOS 공통.
+import { join } from 'node:path';
+import { mkdirSync } from 'node:fs';
+import { openDb } from '../store/db.js';
+import { Settings } from '../store/settings.js';
+import { MissionControl } from '../mission/missions.js';
+import { defaultExecutors, searchExecutors } from '../mission/executors.js';
+import { QuickActions, defaultQuickActions, searchQuickActions } from '../quick/quickActions.js';
+import { MemoryStore } from '../memory/memory.js';
+import { MeetingStore } from '../meeting/meetings.js';
+import { LiveMeetings } from '../meeting/live.js';
+import { CharacterStore } from '../character/characters.js';
+import { ProviderRegistry } from '../providers/registry.js';
+import { createMockProvider } from '../providers/mock.js';
+import { Conversation, createTransferExecutor, TRANSFER_KIND } from '../conversation/transfer.js';
+import { TurnManager } from '../conversation/turns.js';
+import { SpeechPlayer } from '../voice/player.js';
+import { createSystemSpeaker } from '../voice/system-speaker.js';
+import { SpeechToText } from '../voice/stt.js';
+import { acquireDataLock } from './data-lock.js';
+
+const VOICE_KEY = 'voice.enabled';
+const FAST_KEY = 'chat.fast';
+const AUTO_THINK_KEY = 'chat.autoThink';
+const PREVIEW_TEXT = '안녕하세요. 이 목소리로 대답할게요.';
+
+// 목소리마다 OS 합성기를 처음 쓸 때 만든다. 지원하지 않는 OS면 그 문장만 실패로 알린다.
+function systemSpeakerFactory() {
+  const cache = new Map();
+  return (voice) => {
+    const key = voice ?? '';
+    return {
+      speak(text) {
+        try {
+          if (!cache.has(key)) cache.set(key, createSystemSpeaker({ voice: voice ?? undefined }));
+        } catch (e) {
+          return { done: Promise.reject(e), kill() {} };
+        }
+        return cache.get(key).speak(text);
+      },
+      listVoices() {
+        try {
+          return createSystemSpeaker().listVoices();
+        } catch (e) {
+          return Promise.reject(e);
+        }
+      },
+    };
+  };
+}
+
+// dataDir: DB와 회의 원음을 두는 폴더.
+// 검사용으로 바꿔 끼울 수 있는 것: providers, speaker(목소리와 무관한 고정 스피커), speakerFactory(voice → speaker),
+// stt(SpeechToText 또는 { launcher, ffmpeg } 설정). 없으면 받아쓰기는 "설정 안 됨"으로 알린다.
+// meetingStt: 회의 파일용 받아쓰기(같은 형식). 없으면 stt를 쓴다.
+export function createServices({ dataDir, env = process.env, providers, speaker, speakerFactory, stt, meetingStt, recover = true }) {
+  mkdirSync(dataDir, { recursive: true });
+  // 같은 데이터 폴더를 쓰는 다른 JARVIS가 있으면 DB를 열거나 복원하기 전에 멈춘다(src/app/data-lock.js).
+  const lock = acquireDataLock(dataDir);
+  let db;
+  try {
+    db = openDb(join(dataDir, 'jarvis.db'));
+  } catch (e) {
+    lock.release();
+    throw e;
+  }
+  const settings = new Settings(db);
+  const registry = providers ?? ProviderRegistry.fromEnv({ env });
+  if (!registry.providers.mock) registry.providers.mock = createMockProvider('mock');
+  const memory = new MemoryStore(db);
+  const characters = new CharacterStore(db, settings);
+  const audioDir = join(dataDir, 'meetings');
+  mkdirSync(audioDir, { recursive: true });
+  const meetings = new MeetingStore(db, { audioDir });
+  const missions = new MissionControl(db, {
+    executors: { ...defaultExecutors(), ...searchExecutors({ memory, meetings }), [TRANSFER_KIND]: createTransferExecutor({ memory, providers: registry }) },
+  });
+
+  // 음성 출력: 설정이 없으면 꺼짐. 적용한 캐릭터의 목소리로 읽는다.
+  const factory = speaker ? () => speaker : (speakerFactory ?? systemSpeakerFactory());
+  const currentSpeaker = { speak: (text) => factory(characters.active()?.voice ?? null).speak(text) };
+  const voiceErrors = [];
+  let turns;
+  const player = new SpeechPlayer({
+    speaker: currentSpeaker,
+    onEnded: (id) => turns.playbackEnded(id),
+    onError: (id, e) => { voiceErrors.push({ turnId: id, code: e.code ?? 'tts_failed', message: e.message }); voiceErrors.splice(0, voiceErrors.length - 20); },
+  });
+  turns = new TurnManager({ providers: registry, player });
+  const voice = {
+    get enabled() { return settings.get(VOICE_KEY, false) === true; },
+    set enabled(v) { settings.set(VOICE_KEY, v === true); },
+    turns,
+    errors: voiceErrors,
+    // 지금·방금 스피커로 읽은 글(메모리에만, 최근 8문장). 듣기 모드 에코 판단용(T219).
+    recentSpoken: (windowMs) => player.recentText(windowMs),
+    status: () => {
+      const c = characters.active();
+      return {
+        enabled: voice.enabled,
+        state: turns.state,
+        character: c ? { id: c.id, name: c.name, voice: c.voice, look: c.look } : null,
+        lastError: voiceErrors.at(-1) ?? null,
+      };
+    },
+    listVoices: () => (factory(null).listVoices?.() ?? Promise.resolve([])),
+    // 캐릭터 목소리 미리 듣기: 사용자가 누를 때만 한 문장을 말한다. 끌 때 멈출 수 있게 지금 말하는 것을 기억한다.
+    previewing: null,
+    async preview(characterId) {
+      const c = characters.get(characterId);
+      const h = factory(c.voice ?? null).speak(PREVIEW_TEXT);
+      voice.previewing = h;
+      try {
+        const r = await h.done;
+        return { id: c.id, voice: c.voice, text: PREVIEW_TEXT, killed: Boolean(r?.killed) };
+      } finally {
+        if (voice.previewing === h) voice.previewing = null;
+      }
+    },
+  };
+
+  const services = {
+    db,
+    dataDir,
+    settings,
+    memory,
+    missions,
+    characters,
+    providers: registry,
+    voice,
+    // 빠른 답(생각 생략) 설정. 기본 켬(2026-11-14 사용자 결정, T097). 사용자가 끄면 그 값이 재시작 후에도 유지된다.
+    chatSettings: {
+      get fast() { return settings.get(FAST_KEY, true) === true; },
+      set fast(v) { settings.set(FAST_KEY, v === true); },
+      // 계산·추론 질문 자동 생각함. 기본 켬(2026-11-14 사용자 결정, T224).
+      get autoThink() { return settings.get(AUTO_THINK_KEY, true) === true; },
+      set autoThink(v) { settings.set(AUTO_THINK_KEY, v === true); },
+    },
+    // 빠른 작업: 모의 2개 + 이 기기 기억·회의록 검색(FR-007a)
+    quick: new QuickActions(missions, { ...defaultQuickActions(), ...searchQuickActions({ memory, meetings }) }),
+    chat: new Conversation({ missions, memory, providers: registry, turns, characters }),
+    meetings,
+    stt: stt instanceof SpeechToText ? stt : new SpeechToText(stt ?? {}),
+    meetingStt: null,
+    recovered: { missions: [], meetings: [] },
+    // 끄기 첫 단계: 진행 중인 답 생성·소리 읽기·미리 듣기·실행 중 전송 미션·받아쓰기(whisper 자식 프로세스)를 끊는다.
+    // DB는 아직 닫지 않는다(끊긴 요청이 응답과 상태 기록을 마친 뒤 shutdown.js가 닫음).
+    cancelAll: () => {
+      turns.cancel();
+      services.chat.stopAll();
+      missions.abortAll();
+      voice.previewing?.kill();
+      services.stt.close();
+      if (services.meetingStt !== services.stt) services.meetingStt.close();
+    },
+    close: () => { turns.cancel(); services.stt.close(); if (services.meetingStt !== services.stt) services.meetingStt.close(); db.close(); lock.release(); },
+  };
+  // 회의 파일 받아쓰기(VAD 없는 엔진). 따로 주지 않으면 일반 받아쓰기를 같이 쓴다.
+  services.meetingStt = meetingStt ? (meetingStt instanceof SpeechToText ? meetingStt : new SpeechToText(meetingStt)) : services.stt;
+  // 회의 마이크 녹음(T123): 조각을 원음 뒤에 붙이고 회의용 엔진으로 받아 적는다.
+  services.liveMeetings = new LiveMeetings(services.meetings, services.meetingStt);
+  // 앱 시작 때 한 번: 실행·녹음 도중 꺼진 것을 중단으로 표시한다(자동 재실행 없음).
+  if (recover) {
+    services.recovered = {
+      missions: missions.recoverInterrupted(),
+      meetings: services.meetings.recoverInterrupted(),
+    };
+    // 녹음 중 꺼진 회의의 원음은 머리글 크기를 맞춰 재생할 수 있게 한다.
+    services.liveMeetings.repair(services.recovered.meetings);
+  }
+  return services;
+}

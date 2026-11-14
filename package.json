@@ -1,0 +1,16 @@
+{
+  "name": "jarvis-hybrid-2-0",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "JARVIS Hybrid 2.0 (Windows·macOS 각각 단독 실행, Node 24 내장 기능만)",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 test/*.test.js",
+    "start": "node src/main.js --open",
+    "serve": "node src/main.js",
+    "cli": "node src/cli.js"
+  }
+}
