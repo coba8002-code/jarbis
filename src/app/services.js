@@ -1,6 +1,8 @@
 // 앱 조립: DB와 각 기능을 한 곳에서 만든다. Windows·macOS 공통.
 import { join } from 'node:path';
-import { mkdirSync } from 'node:fs';
+import { AppError } from '../errors.js';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { openDb } from '../store/db.js';
 import { Settings } from '../store/settings.js';
 import { MissionControl } from '../mission/missions.js';
@@ -43,6 +45,15 @@ function systemSpeakerFactory() {
           return { done: Promise.reject(e), kill() {} };
         }
         return cache.get(key).speak(text);
+      },
+      // 기기로 보낼 WAV 만들기(소리 없음). 기기에 음성 엔진이 없을 때 쓰는 PC 음성 대체(/api/tts).
+      synthesizeToFile(text, path) {
+        try {
+          if (!cache.has(key)) cache.set(key, createSystemSpeaker({ voice: voice ?? undefined }));
+        } catch (e) {
+          return Promise.reject(e);
+        }
+        return cache.get(key).synthesizeToFile(text, path);
       },
       listVoices() {
         try {
@@ -113,6 +124,19 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
       };
     },
     listVoices: () => (factory(null).listVoices?.() ?? Promise.resolve([])),
+    // PC 음성 대체: 적용한 캐릭터 목소리로 WAV를 만들어 돌려준다(임시 파일은 바로 지움, 저장 안 함).
+    async synthesizeWav(text) {
+      const sp = factory(characters.active()?.voice ?? null);
+      if (typeof sp.synthesizeToFile !== 'function') throw new AppError('tts_unavailable', '이 PC에서는 음성 파일을 만들 수 없음');
+      const dir = mkdtempSync(join(tmpdir(), 'jarvis-tts-'));
+      try {
+        const path = join(dir, 'say.wav');
+        await sp.synthesizeToFile(text, path);
+        return readFileSync(path);
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
     // 캐릭터 목소리 미리 듣기: 사용자가 누를 때만 한 문장을 말한다. 끌 때 멈출 수 있게 지금 말하는 것을 기억한다.
     previewing: null,
     async preview(characterId) {

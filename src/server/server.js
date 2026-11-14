@@ -58,6 +58,8 @@ const STATUS = {
   storage_error: 500,
   stt_failed: 502,
   stt_unavailable: 503,
+  tts_unavailable: 503,
+  tts_failed: 502,
 };
 const MAX_AUDIO = 25 * 1024 * 1024;
 const MAX_MEETING_AUDIO = 200 * 1024 * 1024; // 회의 음성 파일 최대 200MB
@@ -367,6 +369,17 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
         }
         if (req.method === 'DELETE') return send(res, 200, services.avatarImages.remove(id, state));
         return send(res, 404, { error: { code: 'not_found', message: '없는 주소' } });
+      }
+      // PC 음성 대체(토큰 필요): 기기(토스 기기 등)에 음성 엔진이 없을 때 { text }를 PC 음성으로 WAV로 만들어 준다.
+      // 화면은 받아서 그 기기 스피커로만 재생한다. 글은 최대 2000자, 저장하지 않는다.
+      if (url.pathname === '/api/tts' && req.method === 'POST') {
+        const b = await readJson(req);
+        if (typeof b.text !== 'string' || !b.text.trim()) throw new AppError('invalid_input', 'text(읽을 글)가 필요함');
+        if (b.text.length > 2000) throw new AppError('invalid_input', 'text는 2000자까지');
+        if (typeof services.voice?.synthesizeWav !== 'function') throw new AppError('tts_unavailable', '음성 합성이 준비되지 않음');
+        const wav = await services.voice.synthesizeWav(b.text.trim());
+        res.writeHead(200, { 'content-type': 'audio/wav', 'content-length': wav.length, 'cache-control': 'no-store', 'x-content-type-options': 'nosniff' });
+        return res.end(wav);
       }
       // 회의 원음 재생용(토큰 필요). 화면은 받아서 브라우저 안에서만 재생한다.
       const audioMatch = url.pathname.match(/^\/api\/meetings\/(\d+)\/audio$/);
