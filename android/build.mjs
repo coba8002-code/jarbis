@@ -40,7 +40,11 @@ console.log(`build-tools ${bt}\nplatform ${platform}`);
 
 // 1) 매니페스트 → 기본 APK
 const base = join(out, 'build', 'base.apk');
-run(tool('aapt2'), ['link', '-I', androidJar, '--manifest', join(here, 'AndroidManifest.xml'), '--min-sdk-version', '24', '--target-sdk-version', '35', '-o', base]);
+// 앱 아이콘 등 res/ (있으면) → 컴파일해서 함께 링크
+const resDir = join(here, 'res');
+const resZip = join(out, 'build', 'res.zip');
+const resArgs = existsSync(resDir) ? (run(tool('aapt2'), ['compile', '--dir', resDir, '-o', resZip]), ['-R', resZip, '--auto-add-overlay']) : [];
+run(tool('aapt2'), ['link', '-I', androidJar, '--manifest', join(here, 'AndroidManifest.xml'), ...resArgs, '--min-sdk-version', '24', '--target-sdk-version', '35', '-o', base]);
 // 2) 자바 → class
 run(jdk('javac'), ['-encoding', 'UTF-8', '-source', '11', '-target', '11', '-Xlint:-options', '-classpath', androidJar, '-d', join(out, 'build', 'classes'), ...javaFiles(join(here, 'src'))]);
 // 3) class → dex

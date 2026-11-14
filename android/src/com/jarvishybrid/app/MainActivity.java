@@ -21,6 +21,7 @@ import android.speech.tts.UtteranceProgressListener;
 import android.text.InputType;
 import android.util.TypedValue;
 import android.view.Gravity;
+import android.view.View;
 import android.view.ViewGroup;
 import android.view.WindowManager;
 import android.webkit.JavascriptInterface;
@@ -33,6 +34,7 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -69,6 +71,12 @@ public class MainActivity extends Activity implements SensorEventListener {
     private PermissionRequest pendingRequest;
     private String origin = "";
     private String pin = "";
+    // 연결이 안 될 때(부팅 직후 와이파이·VPN 준비 전, PC 꺼짐) 저장된 설정으로 다시 해 보는 간격
+    private static final long RETRY_MS = 15000;
+    private final Runnable retry = () -> {
+        String s = prefs.getString("server", "");
+        if (web == null && validServer(s) && normalizePin(pin).length() == 64) showWeb(s);
+    };
 
     @Override
     protected void onCreate(Bundle state) {
@@ -90,7 +98,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         String server = prefs.getString("server", "");
         pin = prefs.getString("pin", "");
         if (validServer(server) && normalizePin(pin).length() == 64) showWeb(server);
-        else showSetup(null);
+        else showSetup(null, false);
     }
 
     // ---------- 연결 설정 화면 ----------
@@ -118,7 +126,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         return e;
     }
 
-    private void showSetup(String message) {
+    private void showSetup(String message, boolean autoRetry) {
+        cancelRetry();
         if (web != null) { web.destroy(); web = null; }
         LinearLayout box = new LinearLayout(this);
         box.setOrientation(LinearLayout.VERTICAL);
@@ -142,10 +151,17 @@ public class MainActivity extends Activity implements SensorEventListener {
         TextView pinErr = text("", 14, BAD, false);
         box.addView(pinErr);
         if (message != null) {
-            TextView m = text(message, 14, BAD, false);
+            TextView m = text(autoRetry ? message + " " + (RETRY_MS / 1000) + "초마다 다시 연결해 볼게요(칸을 누르면 멈춤)." : message, 14, BAD, false);
             m.setPadding(0, dp(16), 0, 0);
             box.addView(m);
         }
+        CheckBox boot = new CheckBox(this);
+        boot.setText("기기가 켜지면 JARVIS 자동으로 열기");
+        boot.setTextColor(TEXT);
+        boot.setChecked(prefs.getBoolean("autostart", true));
+        boot.setOnCheckedChangeListener((v, on) -> prefs.edit().putBoolean("autostart", on).apply());
+        boot.setPadding(0, dp(16), 0, 0);
+        box.addView(boot);
         Button go = new Button(this);
         go.setText("연결하기");
         go.setAllCaps(false);
@@ -159,8 +175,8 @@ public class MainActivity extends Activity implements SensorEventListener {
         lp.topMargin = dp(24);
         go.setLayoutParams(lp);
         // 칸을 떠날 때 검사, 고치면 오류를 지움
-        server.setOnFocusChangeListener((v, has) -> { if (!has) serverErr.setText(serverProblem(server.getText().toString())); });
-        pinField.setOnFocusChangeListener((v, has) -> { if (!has) pinErr.setText(pinProblem(pinField.getText().toString())); });
+        server.setOnFocusChangeListener((v, has) -> { if (has) cancelRetry(); else serverErr.setText(serverProblem(server.getText().toString())); });
+        pinField.setOnFocusChangeListener((v, has) -> { if (has) cancelRetry(); else pinErr.setText(pinProblem(pinField.getText().toString())); });
         go.setOnClickListener(v -> {
             String s = server.getText().toString().trim();
             String p = pinField.getText().toString().trim();
@@ -178,6 +194,11 @@ public class MainActivity extends Activity implements SensorEventListener {
         scroll.setBackgroundColor(BG);
         scroll.addView(box);
         setContentView(scroll);
+        if (autoRetry) getWindow().getDecorView().postDelayed(retry, RETRY_MS);
+    }
+
+    private void cancelRetry() {
+        getWindow().getDecorView().removeCallbacks(retry);
     }
 
     private static boolean validServer(String s) {
@@ -240,7 +261,7 @@ public class MainActivity extends Activity implements SensorEventListener {
                     handler.proceed();
                 } else {
                     handler.cancel();
-                    later(() -> showSetup("인증서 지문이 맞지 않아 연결하지 않았어요. PC 화면에 나온 지문과 같은지 확인해 주세요."));
+                    later(() -> showSetup("인증서 지문이 맞지 않아 연결하지 않았어요. PC 화면에 나온 지문과 같은지 확인해 주세요.", false));
                 }
             }
 
@@ -252,7 +273,7 @@ public class MainActivity extends Activity implements SensorEventListener {
             @Override
             public void onReceivedError(WebView view, WebResourceRequest request, WebResourceError error) {
                 if (request.isForMainFrame()) {
-                    later(() -> showSetup("PC의 JARVIS에 연결하지 못했어요. PC에서 JARVIS가 --https로 켜져 있는지, 같은 와이파이인지, 주소가 맞는지 확인해 주세요."));
+                    later(() -> showSetup("PC의 JARVIS에 연결하지 못했어요. PC에서 JARVIS가 --https로 켜져 있는지, 같은 와이파이(또는 Tailscale)인지, 주소가 맞는지 확인해 주세요.", true));
                 }
             }
         });
@@ -354,7 +375,22 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     protected void onResume() {
         super.onResume();
+        immersive();
         if (web != null) { web.onResume(); startProximity(); }
+    }
+
+    // 키오스크처럼: 위 상태 줄·아래 단추 줄을 숨긴다(화면 끝에서 밀면 잠깐 보임)
+    @Override
+    public void onWindowFocusChanged(boolean hasFocus) {
+        super.onWindowFocusChanged(hasFocus);
+        if (hasFocus) immersive();
+    }
+
+    @SuppressWarnings("deprecation")
+    private void immersive() {
+        getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                | View.SYSTEM_UI_FLAG_FULLSCREEN | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION);
     }
 
     @Override
@@ -366,6 +402,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     @Override
     protected void onDestroy() {
+        cancelRetry();
         if (tts != null) tts.shutdown();
         if (web != null) web.destroy();
         super.onDestroy();
@@ -404,7 +441,7 @@ public class MainActivity extends Activity implements SensorEventListener {
         }
 
         @JavascriptInterface public void openSetup() {
-            later(() -> showSetup(null));
+            later(() -> showSetup(null, false));
         }
     }
 }
