@@ -201,7 +201,7 @@ export function mountIdleBoard(hooks) {
       el('div', {},
         el('div', { class: 'ib-wx-temp' }, `${Math.round(w.temp)}°`),
         el('div', { class: 'ib-wx-text' }, `${w.place} · ${w.sky}`),
-        el('div', { class: 'ib-wx-sub' }, [w.min !== null && w.max !== null ? `최저 ${Math.round(w.min)}° 최고 ${Math.round(w.max)}°` : null, w.pop !== null ? `비 ${w.pop}%` : null].filter(Boolean).join(' · '))));
+        el('div', { class: 'ib-wx-sub' }, [w.min !== null && w.max !== null ? `${w.range && w.range !== '오늘' ? `${w.range} ` : ''}최저 ${Math.round(w.min)}° 최고 ${Math.round(w.max)}°` : null, w.pop !== null ? `비 ${w.pop}%` : null].filter(Boolean).join(' · '))));
     weather.setAttribute('aria-label', `날씨 ${w.place} ${w.sky} ${Math.round(w.temp)}도`);
   }
   function renderLists(b) {

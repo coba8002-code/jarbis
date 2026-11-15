@@ -53,14 +53,28 @@ export function parseKmaForecast(text, now = new Date()) {
   if (!cur) return null;
   const s = slots.get(cur);
   const temps = keys.filter((k) => k.startsWith(today)).map((k) => Number(slots.get(k).TMP)).filter(Number.isFinite);
-  let min = null; let max = null;
-  for (const it of items) {
-    if (String(it.fcstDate) !== today) continue;
-    if (it.category === 'TMN') min = Number(it.fcstValue);
-    if (it.category === 'TMX') max = Number(it.fcstValue);
+  // 최저·최고(T374): 오늘 TMN·TMX가 있으면 "오늘". 저녁 발표엔 오늘 값이 빠지므로 오후 3시 넘으면 "내일" 값,
+  // 그것도 없으면 오늘 남은 시간의 기온에서 구하고 "오늘 남은 시간"이라고 알린다.
+  const dayMinMax = (day) => {
+    let n = null; let x = null;
+    for (const it of items) {
+      if (String(it.fcstDate) !== day) continue;
+      if (it.category === 'TMN') n = Number(it.fcstValue);
+      if (it.category === 'TMX') x = Number(it.fcstValue);
+    }
+    return { n: Number.isFinite(n) ? n : null, x: Number.isFinite(x) ? x : null };
+  };
+  const t0 = dayMinMax(today);
+  const tomorrowDay = dayOf(new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1)).replaceAll('-', '');
+  const t1 = dayMinMax(tomorrowDay);
+  let min = t0.n; let max = t0.x; let range = '오늘';
+  if ((min === null || max === null) && now.getHours() >= 15 && t1.n !== null && t1.x !== null) {
+    min = t1.n; max = t1.x; range = '내일';
+  } else if (min === null || max === null) {
+    if (min === null && temps.length) min = Math.min(...temps);
+    if (max === null && temps.length) max = Math.max(...temps);
+    range = '오늘 남은 시간';
   }
-  if (min === null && temps.length) min = Math.min(...temps);
-  if (max === null && temps.length) max = Math.max(...temps);
   const pty = Number(s.PTY ?? 0);
   const sky = Number(s.SKY ?? 1);
   const pops = keys.filter((k) => k.startsWith(today) && k >= nowKey).map((k) => Number(slots.get(k).POP)).filter(Number.isFinite);
@@ -71,6 +85,7 @@ export function parseKmaForecast(text, now = new Date()) {
     pop: pops.length ? Math.max(...pops) : (Number.isFinite(Number(s.POP)) ? Number(s.POP) : null),
     min: Number.isFinite(min) ? min : null,
     max: Number.isFinite(max) ? max : null,
+    range,
     at: `${cur.slice(8, 10)}:${cur.slice(10, 12)}`,
   };
 }

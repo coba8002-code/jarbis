@@ -130,6 +130,102 @@ export function buildPlanRequest(question, skill, { now = new Date(), home = nul
   };
 }
 
+// ---- 기상청 응답 줄이기(2026-11-15, T372) ----
+// 단기예보 원문(JSON)은 3일치가 130KB쯤이라 글자 수로 자르면 처음 1~4시간만 남는다("내일 비 와?"에 내일 자료가 없음).
+// 시간마다 한 줄로 줄여 3일치가 다 들어가게 한다(약 3~5천 자). 기상청 모양이 아니면 null(원문 그대로 씀).
+const KMA_SKY = { 1: '맑음', 3: '구름 많음', 4: '흐림' };
+const KMA_PTY = { 1: '비', 2: '비/눈', 3: '눈', 4: '소나기', 5: '빗방울', 6: '빗방울/눈날림', 7: '눈날림' };
+
+// 응답 안 어디에 있든 기상청 항목 배열({ category, … })을 찾는다
+export function findKmaItems(v, depth = 0) {
+  if (!v || depth > 6) return null;
+  if (Array.isArray(v)) {
+    if (v.length && v.every((x) => x && typeof x === 'object' && 'category' in x)) return v;
+    for (const x of v) { const f = findKmaItems(x, depth + 1); if (f) return f; }
+    return null;
+  }
+  if (typeof v === 'object') for (const x of Object.values(v)) { const f = findKmaItems(x, depth + 1); if (f) return f; }
+  return null;
+}
+
+const md = (d) => `${Number(String(d).slice(4, 6))}/${Number(String(d).slice(6, 8))}`;
+const hh = (t) => `${String(t).padStart(4, '0').slice(0, 2)}시`;
+const noRain = (v) => !v || /없음/.test(v) || v === '0';
+
+export function compactKma(text) {
+  let j;
+  try { j = JSON.parse(text); } catch { return null; }
+  const items = findKmaItems(j);
+  if (!items) return null;
+  // 초단기실황(관측): obsrValue
+  if (items.every((i) => 'obsrValue' in i)) {
+    const v = Object.fromEntries(items.map((i) => [i.category, String(i.obsrValue)]));
+    const it = items[0];
+    const pty = Number(v.PTY ?? 0);
+    const parts = [
+      v.T1H !== undefined ? `기온 ${v.T1H}°` : null,
+      pty > 0 ? `${KMA_PTY[pty] ?? '비'} 옴` : '비·눈 없음',
+      v.RN1 !== undefined && !noRain(v.RN1) ? `1시간 강수 ${v.RN1}mm` : null,
+      v.REH !== undefined ? `습도 ${v.REH}%` : null,
+      v.WSD !== undefined ? `바람 ${v.WSD}m/s` : null,
+    ].filter(Boolean);
+    return `기상청 초단기실황(관측 ${md(it.baseDate)} ${String(it.baseTime).padStart(4, '0').slice(0, 2)}:${String(it.baseTime).padStart(4, '0').slice(2)}): ${parts.join(', ')}`;
+  }
+  // 예보(단기·초단기): 날짜+시각마다 한 줄
+  const slots = new Map();
+  const daily = new Map();
+  let base = '';
+  for (const it of items) {
+    const d = String(it.fcstDate ?? ''); const t = String(it.fcstTime ?? '').padStart(4, '0');
+    if (!/^\d{8}$/.test(d) || !/^\d{4}$/.test(t)) continue;
+    if (!base && it.baseDate) base = `${md(it.baseDate)} ${String(it.baseTime ?? '').padStart(4, '0').slice(0, 2)}:${String(it.baseTime ?? '').padStart(4, '0').slice(2)}`;
+    const val = String(it.fcstValue ?? '');
+    if (it.category === 'TMN' || it.category === 'TMX') {
+      if (!daily.has(d)) daily.set(d, {});
+      daily.get(d)[it.category] = val;
+      continue;
+    }
+    const k = d + t;
+    if (!slots.has(k)) slots.set(k, { d, t });
+    slots.get(k)[it.category] = val;
+  }
+  if (!slots.size) return null;
+  const lines = [`기상청 예보(발표 ${base || '알 수 없음'}), 시간별:`];
+  for (const k of [...slots.keys()].sort()) {
+    const s = slots.get(k);
+    const pty = Number(s.PTY ?? 0);
+    const temp = s.TMP ?? s.T1H;
+    const parts = [
+      temp !== undefined ? `${temp}°` : null,
+      pty > 0 ? (KMA_PTY[pty] ?? '비') : (s.SKY !== undefined ? KMA_SKY[Number(s.SKY)] ?? '' : null),
+      s.POP !== undefined ? `비 올 확률 ${s.POP}%` : null,
+      !noRain(s.PCP) ? `강수 ${s.PCP}` : (!noRain(s.RN1) ? `강수 ${s.RN1}` : null),
+      !noRain(s.SNO) ? `눈 ${s.SNO}` : null,
+      s.REH !== undefined ? `습도 ${s.REH}%` : null,
+      s.WSD !== undefined ? `바람 ${s.WSD}m/s` : null,
+    ].filter(Boolean);
+    lines.push(`${md(s.d)} ${hh(s.t)} ${parts.join(', ')}`);
+  }
+  for (const [d, v] of [...daily.entries()].sort()) {
+    const mm = [v.TMN !== undefined ? `최저 ${Number(v.TMN)}°` : null, v.TMX !== undefined ? `최고 ${Number(v.TMX)}°` : null].filter(Boolean);
+    if (mm.length) lines.push(`${md(d)} 하루 ${mm.join(' ')}`);
+  }
+  return lines.join('\n');
+}
+
+// ---- 계획 다듬기(2026-11-15, T373) ----
+// "다음 공휴일 언제야?"처럼 앞으로 찾는 공휴일 질문인데 모델이 이번 달만 물으면 다음 달 공휴일을 놓친다 → 그해 전체로 묻는다.
+export function adjustPlan(skillName, question, plan) {
+  if (!plan || typeof plan !== 'object' || !plan.query || typeof plan.query !== 'object') return plan;
+  if (skillName === 'korean-holiday-calendar' && /다음|언제|남은|앞으로|가까운|이번\s*해|올해/.test(String(question))) {
+    const query = { ...plan.query };
+    delete query.month;
+    delete query.solMonth;
+    return { ...plan, query };
+  }
+  return plan;
+}
+
 // 한국 시각 날짜와 요일(예: 2026-11-14 토요일)
 const kstDay = (d) => { const k = new Date(d.getTime() + 9 * 3600_000); return `${k.toISOString().slice(0, 10)} ${'일월화수목금토'[k.getUTCDay()]}요일`; };
 
@@ -228,7 +324,10 @@ export class KSkills {
       if (buf.length > MAX_BYTES) throw new AppError('skill_failed', '조회 결과가 너무 큼');
       const text = buf.toString('utf8');
       if (!res.ok) throw new AppError('skill_failed', `조회 실패: HTTP ${res.status}`);
-      return { path, query, text: full ? text : text.slice(0, 6000) };
+      if (full) return { path, query, text };
+      // 날씨는 시간마다 한 줄로 줄여서 넣는다(원문을 자르면 앞 몇 시간만 남음)
+      const short = skill.name === 'korea-weather' ? compactKma(text) : null;
+      return { path, query, text: (short ?? text).slice(0, 6000) };
     } catch (e) {
       if (e instanceof AppError) throw e;
       throw new AppError('skill_failed', e.name === 'AbortError' ? '조회 서버가 제때 답하지 않음' : `조회 서버 연결 실패: ${e.cause?.code ?? e.message}`);
@@ -248,7 +347,7 @@ export class KSkills {
       if (!picked) return null;
       skill = picked;
     }
-    const plan = await this.#ask(buildPlanRequest(question, skill, { now: this.now(), home: this.home() }));
+    const plan = adjustPlan(skill.name, question, await this.#ask(buildPlanRequest(question, skill, { now: this.now(), home: this.home() })));
     if (!plan || plan.skip === true) return null;
     if (typeof plan.ask === 'string' && plan.ask.trim() && !plan.path) return { skill: skill.name, ask: plan.ask.trim().slice(0, 200) };
     try {
@@ -269,7 +368,7 @@ export class KSkills {
     if (!skill || !home || !this.enabledMap()['korea-weather']) return null;
     try {
       const r = await this.call(skill, { path: '/v1/korea-weather/forecast', query: { lat: home.lat, lon: home.lon } });
-      return `${home.name || '기본 위치'} 단기예보(기상청, k-skill 조회): ${r.text.slice(0, 2500)}`;
+      return `${home.name || '기본 위치'} 단기예보(기상청, k-skill 조회): ${r.text.slice(0, 3000)}`; // 시간마다 한 줄이라 약 하루 반치
     } catch {
       return null;
     }

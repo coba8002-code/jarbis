@@ -18,7 +18,7 @@ const forecast = kma([
 ]);
 
 test('기상청 단기예보 읽기: 지금 시각 칸의 기온·하늘, 오늘 최저·최고, 남은 시간 비 확률 최댓값', () => {
-  assert.deepEqual(parseKmaForecast(forecast, NOW), { temp: 8, sky: '구름 많음', icon: 'partly', pop: 60, min: 3, max: 14, at: '09:00' });
+  assert.deepEqual(parseKmaForecast(forecast, NOW), { temp: 8, sky: '구름 많음', icon: 'partly', pop: 60, min: 3, max: 14, range: '오늘', at: '09:00' });
   const rain = parseKmaForecast(kma([row('TMP', '20261115', '1000', '5'), row('SKY', '20261115', '1000', '4'), row('PTY', '20261115', '1000', '1')]), NOW);
   assert.equal(rain.sky, '비');
   assert.equal(rain.icon, 'rain');
