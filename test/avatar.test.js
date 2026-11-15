@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { avatarState, mouthAt, renderAvatar, normalizeLook, DEFAULT_LOOK } from '../src/server/public/avatar.js';
+import { avatarState, mouthAt, renderAvatar, normalizeLook, DEFAULT_LOOK, levelMouth, syllableMouth, wordMouth, mouthAmount, wavEnvelope, envelopeAt, createLevelMeter, createBlinker } from '../src/server/public/avatar.js';
 import { openDb } from '../src/store/db.js';
 import { Settings } from '../src/store/settings.js';
 import { CharacterStore } from '../src/character/characters.js';
@@ -139,4 +139,85 @@ test('상태 흐름: 답 생성 → 말하기 → 멈추기면 대기, 재생이
   assert.equal(await face(), 'speaking');
   for (let i = 0; i < 400 && (await face()) === 'speaking'; i += 1) { handles.forEach((h) => h.end()); await tick(); }
   assert.equal(await face(), 'idle');
+});
+
+// ---------- 립싱크·눈 깜빡임(2026-11-15) ----------
+function wav16(samples, rate = 16000) {
+  const data = Buffer.alloc(samples.length * 2);
+  samples.forEach((x, i) => data.writeInt16LE(Math.round(Math.max(-1, Math.min(1, x)) * 32767), i * 2));
+  const h = Buffer.alloc(44);
+  h.write('RIFF', 0); h.writeUInt32LE(36 + data.length, 4); h.write('WAVE', 8); h.write('fmt ', 12);
+  h.writeUInt32LE(16, 16); h.writeUInt16LE(1, 20); h.writeUInt16LE(1, 22); h.writeUInt32LE(rate, 24); h.writeUInt32LE(rate * 2, 28); h.writeUInt16LE(2, 32); h.writeUInt16LE(16, 34);
+  h.write('data', 36); h.writeUInt32LE(data.length, 40);
+  return new Uint8Array(Buffer.concat([h, data]));
+}
+
+test('립싱크: 소리 크기 → 입 모양(작으면 다묾, 중간 반쯤, 크면 크게), 이상한 값은 다묾', () => {
+  assert.equal(levelMouth(0), 'closed');
+  assert.equal(levelMouth(0.4), 'half');
+  assert.equal(levelMouth(0.9), 'open');
+  assert.equal(levelMouth(NaN), 'closed');
+  assert.deepEqual(['open', 'half', 'closed'].map(mouthAmount), [1, 0.5, 0]);
+});
+
+test('립싱크: WAV 소리 크기 표 — 조용한 구간은 다묾, 큰 구간은 크게, 모르는 형식은 null', () => {
+  const rate = 16000; const s = [];
+  for (let i = 0; i < rate * 0.2; i += 1) s.push(0); // 0.2초 조용
+  for (let i = 0; i < rate * 0.2; i += 1) s.push(0.5 * Math.sin(i / 5)); // 0.2초 큰 소리
+  for (let i = 0; i < rate * 0.2; i += 1) s.push(0.12 * Math.sin(i / 5)); // 0.2초 작은 소리
+  const env = wavEnvelope(wav16(s, rate), 20);
+  assert.equal(env.frameMs, 20);
+  assert.equal(env.levels.length, 30);
+  assert.equal(levelMouth(envelopeAt(env, 100)), 'closed');
+  assert.equal(levelMouth(envelopeAt(env, 300)), 'open');
+  assert.equal(levelMouth(envelopeAt(env, 500)), 'closed'); // 큰 소리의 1/4 → 다묾 쪽
+  assert.equal(envelopeAt(env, 99999), 0); // 끝난 뒤
+  assert.equal(wavEnvelope(new Uint8Array(10)), null);
+  assert.equal(wavEnvelope(new TextEncoder().encode('RIFF....WAVEnot a real wav file at all, just text here')), null);
+  const odd = wav16([0.1, 0.2]); odd[34] = 8; // 8비트는 지원 안 함
+  assert.equal(wavEnvelope(odd), null);
+});
+
+test('립싱크: 소리 크기를 모를 때 말소리 박자(세 모양을 모두 쓰고 매번 같은 결과), 단어 알림 뒤에는 단어 길이만큼만 움직인다', () => {
+  const seen = new Set(); for (let t = 0; t < 1500; t += 10) seen.add(syllableMouth(t));
+  assert.deepEqual([...seen].sort(), ['closed', 'half', 'open']);
+  assert.equal(syllableMouth(0), 'open');
+  assert.equal(syllableMouth(-5), 'closed');
+  assert.equal(syllableMouth(1234), syllableMouth(1234));
+  assert.equal(wordMouth(0, 3), 'open');
+  assert.equal(wordMouth(3 * 140 + 1, 3), 'closed'); // 세 글자 단어는 0.42초 뒤 다묾
+  assert.equal(wordMouth(5000, 50), 'closed'); // 아주 긴 단어도 1.2초까지만
+});
+
+test('마이크 크기: 작게 말해도 0~1로 맞추고, 조용하면 0', () => {
+  const m = createLevelMeter();
+  for (let i = 0; i < 60; i += 1) m.push(0.03); // 3초쯤 말하면
+  assert.ok(m.level() > 0.9, String(m.level()));
+  for (let i = 0; i < 30; i += 1) m.push(0);
+  assert.equal(m.level(), 0);
+  assert.equal(m.push(NaN), 0);
+});
+
+test('눈 깜빡임: 정해진 간격 뒤 0.15초만 감고, 가끔 두 번 연달아', () => {
+  const b = createBlinker({ rand: () => 0.5 }); // 간격 4250ms, 두 번 연달아 안 함(0.5 ≥ 0.2)
+  assert.equal(b.at(0), false);
+  assert.equal(b.at(4249), false);
+  assert.equal(b.at(4250), true);
+  assert.equal(b.at(4399), true);
+  assert.equal(b.at(4400), false);
+  assert.equal(b.at(8499), false);
+  assert.equal(b.at(8500), true);
+  let r = [0, 0.1, 0.9]; // 첫 간격 2500 → 두 번 연달아(0.1) → 다음 간격
+  const d = createBlinker({ rand: () => r.shift() ?? 0.5 });
+  assert.equal(d.at(0), false);
+  assert.equal(d.at(2500), true);
+  assert.equal(d.at(2650), false);
+  assert.equal(d.at(2770), true); // 0.12초 쉬고 한 번 더
+});
+
+test('도형 얼굴: 눈 감기(blink)면 눈이 곡선, 잘못된 입 값은 다묾', () => {
+  const svg = renderAvatar(DEFAULT_LOOK, 'idle', { blink: true });
+  assert.equal((svg.match(/data-eye="closed"/g) ?? []).length, 2);
+  assert.ok(!renderAvatar(DEFAULT_LOOK, 'idle').includes('data-eye="closed"'));
+  assert.ok(renderAvatar(DEFAULT_LOOK, 'speaking', { mouth: '<x>' }).includes('data-mouth="closed"'));
 });

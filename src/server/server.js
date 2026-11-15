@@ -242,7 +242,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['GET', /^\/api\/character-presets$/, () => listPresets(services.characters)],
     ['POST', /^\/api\/character-presets\/([a-z0-9-]+)\/adopt$/, ([, key]) => {
       const r = adoptPreset(services.characters, key);
-      // 오리지널 캐릭터(자비)는 그림 얼굴 5장을 함께 넣는다(이미 그림이 있으면 그대로 둠)
+      // 오리지널 친구(자비·동물 친구)는 그림 얼굴을 함께 넣는다(사용자가 바꾼 그림은 그대로 둠, 빠진 상태만 채움)
       const added = r.mascot ? applyMascot(services.avatarImages, r.character.id, IMAGE_STATES, r.key) : 0;
       return { ...r, imagesAdded: added, images: services.avatarImages.list(r.character.id) };
     }],

@@ -23,6 +23,7 @@ import java.util.Locale;
  */
 public class MicProbe extends BroadcastReceiver {
     static final String TAG = "JarvisMic";
+    static volatile int preferredId = 0; // --ei device <id>: 이 입력 장치를 골라 녹음(AudioRecord.setPreferredDevice)
     // 소스: 0 DEFAULT, 1 MIC, 5 CAMCORDER(WebView가 씀), 6 VOICE_RECOGNITION, 7 VOICE_COMMUNICATION, 9 UNPROCESSED
     static final String DEFAULT_CONFIGS = "0:44100:2,1:44100:2,5:44100:2,6:44100:2,7:44100:2,9:44100:2,1:48000:1,1:16000:1,6:16000:1";
 
@@ -32,6 +33,7 @@ public class MicProbe extends BroadcastReceiver {
         final int seconds = Math.max(1, Math.min(10, intent.getIntExtra("seconds", 1)));
         final String configs = intent.getStringExtra("configs") != null ? intent.getStringExtra("configs") : DEFAULT_CONFIGS;
         final boolean save = intent.getBooleanExtra("save", false);
+        preferredId = intent.getIntExtra("device", 0);
         new Thread(() -> run(app, seconds, configs, save), "mic-probe").start();
     }
 
@@ -61,6 +63,12 @@ public class MicProbe extends BroadcastReceiver {
         if (min <= 0) { Log.w(TAG, id + " unsupported minBuffer=" + min); return; }
         AudioRecord rec = new AudioRecord(source, rate, mask, AudioFormat.ENCODING_PCM_16BIT, Math.max(min, rate * channels * 2 / 2));
         if (rec.getState() != AudioRecord.STATE_INITIALIZED) { Log.w(TAG, id + " init failed"); rec.release(); return; }
+        if (preferredId != 0) {
+            AudioManager am = (AudioManager) c.getSystemService(Context.AUDIO_SERVICE);
+            for (AudioDeviceInfo d : am.getDevices(AudioManager.GET_DEVICES_INPUTS)) {
+                if (d.getId() == preferredId) id += " pref=" + d.getType() + ":" + rec.setPreferredDevice(d);
+            }
+        }
         short[] all = new short[rate * channels * seconds];
         int got = 0;
         try {

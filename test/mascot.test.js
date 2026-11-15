@@ -9,7 +9,7 @@ import { CHARACTER_PRESETS, MASCOT_DIR, adoptPreset, applyMascot } from '../src/
 import { IMAGE_STATES, sniffImage } from '../src/character/avatar-images.js';
 import { tempDbPath } from './helpers.js';
 
-test('그림이 있는 오리지널 친구(자비 + 동물 친구 10마리): 친구마다 5장, 투명 PNG, 한 장 5MB 이하', () => {
+test('그림이 있는 오리지널 친구(자비 + 동물 친구 10마리): 친구마다 7장(눈 깜빡임·입 다묾 포함), 투명 PNG, 한 장 5MB 이하', () => {
   const withArt = CHARACTER_PRESETS.filter((p) => p.mascot);
   assert.equal(withArt.length, 11);
   assert.ok(withArt.every((p) => p.group === '오리지널'));
@@ -28,11 +28,26 @@ test('자비를 고르면 그림 얼굴이 들어가고, 다시 골라도 바꾼
   t.after(() => s.close());
   const r = adoptPreset(s.characters, 'jabi');
   assert.equal(r.mascot, true);
-  assert.equal(applyMascot(s.avatarImages, r.character.id, IMAGE_STATES), 5);
+  assert.equal(applyMascot(s.avatarImages, r.character.id, IMAGE_STATES), 7);
   assert.deepEqual(s.avatarImages.list(r.character.id).map((x) => x.state), IMAGE_STATES);
   assert.equal(applyMascot(s.avatarImages, r.character.id, IMAGE_STATES), 0);
   assert.equal(adoptPreset(s.characters, 'chiikawa').mascot, false);
   const kiwi = adoptPreset(s.characters, 'kapi');
-  assert.equal(applyMascot(s.avatarImages, kiwi.character.id, IMAGE_STATES, kiwi.key), 5);
+  assert.equal(applyMascot(s.avatarImages, kiwi.character.id, IMAGE_STATES, kiwi.key), 7);
   assert.equal(applyMascot(s.avatarImages, kiwi.character.id, IMAGE_STATES, '../x'), 0);
+});
+
+test('예전에 5장만 받은 친구는 다시 고르면 빠진 2장(눈 깜빡임·입 다묾)만 채우고, 사용자가 바꾼 그림이 있으면 그대로 둔다', (t) => {
+  const s = createServices({ dataDir: dirname(tempDbPath()), providers: new ProviderRegistry({}), speaker: { speak: () => ({ done: Promise.resolve(), kill() {} }) } });
+  t.after(() => s.close());
+  const old = ['idle', 'listening', 'thinking', 'speaking', 'speaking2'];
+  const a = adoptPreset(s.characters, 'gomdol');
+  assert.equal(applyMascot(s.avatarImages, a.character.id, old, a.key), 5);
+  assert.equal(applyMascot(s.avatarImages, a.character.id, IMAGE_STATES, a.key), 2);
+  assert.deepEqual(s.avatarImages.list(a.character.id).map((x) => x.state), IMAGE_STATES);
+  const b = adoptPreset(s.characters, 'nabi');
+  assert.equal(applyMascot(s.avatarImages, b.character.id, old, b.key), 5);
+  s.avatarImages.save(b.character.id, 'idle', readFileSync(`${MASCOT_DIR}gomdol/idle.png`)); // 사용자가 대기 그림을 바꿈
+  assert.equal(applyMascot(s.avatarImages, b.character.id, IMAGE_STATES, b.key), 0);
+  assert.equal(s.avatarImages.list(b.character.id).length, 5);
 });

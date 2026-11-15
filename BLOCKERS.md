@@ -196,3 +196,12 @@ Windows의 실제 글 대화(Ollama), 기억 반영, 캐릭터 편집·적용·�
 - 원인: 오디오 HAL(AudioHardwareTiny/alsa_route)이 내장 마이크를 sound card 0으로 보낸다. 그런데 card0 = hdmi-sound(재생 전용), 실제 코덱 es8316(마이크·ADC)은 card1. 로그: "route_info->sound_card 0", "Can not get ctl : ADC Capture Volume".
 - 루트·벤더 파티션 수정 없이는 못 고친다(파티션 쓰기 금지). 해결: USB 마이크(OTG). 안드로이드는 USB 입력이 꽂히면 내장 마이크보다 먼저 쓴다.
 - 화면: 신호가 0이면 "USB 마이크를 꽂아 주세요"라고 알려 준다. 서버: JARVIS_AUDIO_DIAG=1이면 받은 음성의 길이·RMS·피크를 로그에 한 줄 남긴다(음성은 저장 안 함).
+
+## 토스 프론트 하드웨어 점검·마이크 정정 (2026-11-15 11:43~11:55 KST, 앱 0.2.4)
+- 정정: 11:08의 "전부 0"은 앱 마이크 권한이 '이번만 허용'(ONE_TIME)으로 풀려 안드로이드가 무음을 준 탓이 컸다. 권한을 다시 준 뒤 측정: -66~-76 dBFS, 0인 샘플 55~90%(켜질 때 잠깐 튀고 곧 완전 0). 스피커로 440Hz를 내며 녹음해도 그 소리가 안 잡힘 → 내장 마이크 경로(코덱 믹서)는 여전히 꺼짐.
+- 원인(확정): HAL이 PCM은 card1(es8316, rockchipes8316c)로 열지만 믹서 경로(alsa_route)는 card0(rockchiphdmi)에 건다("route_info->sound_card 0", "Can not get ctl : ADC Capture Volume"). 그래서 es8316의 마이크·ADC 믹서가 한 번도 켜지지 않는다. 스피커 출력도 같은 이유로 믹서 미설정(재생 스트림은 정상 진행, 소리 들리는지는 사람 확인 필요).
+- 무루트로 안 됨: /dev/snd/controlC1은 audio 그룹 전용(shell 불가), vendor 속성 setprop 불가, 앱에서 장치 선택(setPreferredDevice)해도 내장 마이크=같은 경로, HDMI 입력(type 9)은 쓰레기 신호.
+- 가능한 수정(대표님 결정 필요): (A) 이 GSI는 userdebug(ro.debuggable=1)라 adb root로 tinymix -D 1 믹서를 켤 수 있음(파티션 쓰기 없음, 재부팅하면 원래대로) (B) Magisk/부트 수정으로 영구 적용(플래시 필요) (C) USB 마이크(위험 없음).
+- 권한 재발 방지: 재설치 시 install -g로 ONE_TIME 플래그 제거, PC 다리 스크립트가 5분마다 pm grant.
+- 재설치하면 연결 설정이 지워짐 → ConfigReceiver(adb 전용)로 주소·지문 복구: am broadcast -n com.jarvishybrid.app/.ConfigReceiver --es server https://127.0.0.1:4780 --es pin <지문>. 평소 업데이트는 같은 android/out/debug.keystore로 서명한 APK를 install -r(설정 유지). uninstall은 하지 말 것.
+- 점검 결과: 카메라 2개(ov5675b·ov5675, 2592x1944) 실제 프레임 정상(Y 평균 85/82). 단 커널 "Failed to enable afvdd_gpio"(자동초점 전원) 경고. 센서는 가짜 가속도계 1개뿐(/dev/mma8452_daemon 없음, 등록 실패) → 근접·조도 없음. 터치 ilitek_ts 정상, Wi-Fi 정상(RSSI -46), BT 켜짐, USB 호스트 기능 있음(꽂힌 장치 없음).

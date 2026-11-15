@@ -106,12 +106,21 @@ export function adoptPreset(characters, key) {
   return { character: characters.get(c.id), created: !found, mascot: Boolean(p.mascot), key: p.key };
 }
 
-// 그림이 있는 캐릭터(자비)를 고르면, 그 캐릭터에 그림 얼굴이 하나도 없을 때만 상태 그림 5장을 넣는다(사용자가 바꾼 그림은 덮지 않음).
+// 그림이 있는 친구(자비·동물 친구)를 고르면 상태 그림(최대 7장)을 넣는다. 사용자가 바꾼 그림은 덮지 않는다.
 export function applyMascot(avatarImages, characterId, states, key = 'jabi') {
   if (!/^[a-z0-9-]+$/.test(key)) return 0;
-  if (avatarImages.list(characterId).length) return 0;
+  const have = new Set(avatarImages.list(characterId).map((x) => x.state));
+  // 그림이 이미 있으면: 대기 그림이 이 친구의 원래 그림 그대로일 때만 빠진 상태(새로 더한 눈 깜빡임 등)를 채운다.
+  // 사용자가 바꾼 그림이 있으면 섞이지 않게 아무것도 넣지 않는다.
+  if (have.size) {
+    const idle = `${MASCOT_DIR}${key}/idle.png`;
+    let same = false;
+    try { same = have.has('idle') && existsSync(idle) && avatarImages.read(characterId, 'idle').buf.equals(readFileSync(idle)); } catch { same = false; }
+    if (!same) return 0;
+  }
   let n = 0;
   for (const state of states) {
+    if (have.has(state)) continue;
     const f = `${MASCOT_DIR}${key}/${state}.png`;
     if (!existsSync(f)) continue;
     avatarImages.save(characterId, state, readFileSync(f));

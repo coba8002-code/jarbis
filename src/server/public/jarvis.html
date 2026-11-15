@@ -71,6 +71,9 @@
   .say::after { content: ""; position: absolute; left: 50%; bottom: -8px; width: 16px; height: 16px; background: var(--surface); border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); transform: translateX(-50%) rotate(45deg); }
   .say.out { opacity: 0; transform: translateY(4px); }
   #face { width: 232px; height: 232px; display: flex; align-items: center; justify-content: center; transform-origin: 50% 90%; }
+  /* 얼굴은 세 겹: #face(상태별 반복 움직임) > .fx(깡충·끄덕 한 번) > .body(목소리 크기에 맞춘 들썩임·귀 기울이기) */
+  #face .fx, #face .body { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; transform-origin: 50% 90%; }
+  #face .body { transform: translateY(calc(var(--talk, 0) * -6px)) scale(calc(1 + var(--lvl, 0) * .07), calc(1 + var(--talk, 0) * .025 + var(--lvl, 0) * .07)); transition: transform 90ms ease-out; }
   #face svg, #face img { width: 100%; height: 100%; object-fit: contain; }
   .ground { width: 184px; height: 16px; margin-top: -8px; border-radius: 50%; background: rgba(60, 40, 20, .08); }
   .state { margin-top: 16px; text-align: center; font-size: 14px; color: var(--muted); display: flex; align-items: center; justify-content: center; gap: 8px; }
@@ -85,7 +88,12 @@
   #face[data-state="idle"] { animation: breathe 2.4s ease-in-out infinite; }
   #face[data-state="listening"] { animation: breathe 1s ease-in-out infinite; }
   #face[data-state="thinking"] { animation: sway 1.6s ease-in-out infinite; }
-  #face[data-state="speaking"] { animation: bob .48s ease-in-out infinite; }
+  /* 말하기: 입 모양에 맞춰 .body가 들썩이므로 따로 반복하지 않는다 */
+  /* 부르면 깡충(0.6초), 답을 마치면 끄덕(0.5초) — 한 번만 */
+  @keyframes hop { 0% { transform: none; } 20% { transform: translateY(0) scale(1.08, .9); } 45% { transform: translateY(-26px) scale(.95, 1.06); } 70% { transform: translateY(0) scale(1.06, .94); } 100% { transform: none; } }
+  @keyframes nod { 0% { transform: none; } 35% { transform: translateY(6px) scale(1.02, .96); } 65% { transform: translateY(-2px); } 100% { transform: none; } }
+  #face .fx.hop { animation: hop .6s ease-out; }
+  #face .fx.nod { animation: nod .5s ease-in-out; }
 
   /* 요약 타일(읽기 전용, 누르면 설정 화면의 그 탭) */
   .tiles { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -218,7 +226,7 @@
   /* 쉬는 화면: 손 안 댄 지 3분이면 어둡게 덮고 시계만 30초마다 바꾼다(캐릭터 움직임·상태 묻기 멈춤) */
   .sleep { position: fixed; inset: 0; z-index: 10; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; background: #0f0c0a; color: #b8ada1; text-align: center; opacity: 0; pointer-events: none; transition: opacity 300ms ease-out; cursor: pointer; }
   body.asleep .sleep { opacity: 1; pointer-events: auto; }
-  body.asleep #face, body.asleep .dots i { animation: none !important; }
+  body.asleep #face, body.asleep #face .fx, body.asleep .dots i { animation: none !important; }
   .sleep-time { font-size: 48px; font-weight: 500; line-height: 1.1; color: #f3ede6; font-variant-numeric: tabular-nums; }
   .sleep p { margin: 0; max-width: 32ch; font-size: 14px; line-height: 1.5; }
 
@@ -240,7 +248,8 @@
     .check-head { flex-direction: column; }
   }
   @media (prefers-reduced-motion: reduce) {
-    #face, .dots i { animation: none !important; }
+    #face, #face .fx, .dots i { animation: none !important; }
+    #face .body { transform: none !important; transition: none !important; }
     .say, .tip, .icon, .tile, .btn, .round { transition: opacity 150ms linear !important; transform: none !important; }
   }
 </style>
@@ -262,7 +271,7 @@
       <div class="stat">오늘 나눈 대화 <b id="talk-count">0</b>번</div>
       <div class="scene">
         <div class="say out" id="say" aria-hidden="true"></div>
-        <div id="face" role="img" aria-label="캐릭터 얼굴"></div>
+        <div id="face" role="img" aria-label="캐릭터 얼굴"><div class="fx"><div class="body" id="face-body"></div></div></div>
         <div class="ground" aria-hidden="true"></div>
       </div>
       <div class="state" id="state" role="status" aria-live="polite"><i aria-hidden="true"></i><span>준비 중…</span></div>
@@ -417,32 +426,74 @@ async function loadImages() {
     } catch { imgUrl.delete(key); }
   }
 }
-function imageFor(state) {
+// 말하는 입: open=speaking(입 크게), half=speaking2(입 작게), closed=speaking3(입 다묾). 없는 그림은 가까운 것으로.
+const MOUTH_IMAGES = { open: ['speaking', 'speaking2'], half: ['speaking2', 'speaking'], closed: ['speaking3', 'speaking2', 'speaking'] };
+function imageFor(state, { mouth = 'closed', blink = false } = {}) {
   const url = (s) => { const x = face.images.find((i) => i.state === s); return x ? imgUrl.get(`${face.id}:${s}:${x.v}`) ?? null : null; };
   if (state === 'speaking') {
-    // 말하는 중: 1·2를 일정한 박자로 번갈아(입이 열렸다 닫혔다). 움직임 줄이기면 1만.
-    const open = A.mouthAt('speaking', performance.now(), { reducedMotion }) !== 'closed';
-    return (open ? url('speaking') : url('speaking2') ?? url('speaking')) ?? url('speaking') ?? url('idle');
+    for (const s of MOUTH_IMAGES[mouth] ?? MOUTH_IMAGES.closed) { const u = url(s); if (u) return u; }
+    return url('idle');
   }
+  if (state === 'idle' && blink) return url('blink') ?? url('idle'); // 눈 감은 그림은 대기 모습에만 있다
   return url(state) ?? url('idle');
 }
 function currentState() {
   return face.deviceSpeaking ? 'speaking' : A.avatarState({ voiceState: face.voiceState, recording: face.recording, chatPending: face.chatPending });
 }
-function drawFace() {
+
+// ---------- 립싱크·움직임 ----------
+// talk: 지금 말하는 소리의 정보. pc=PC 음성(WAV 소리 크기를 미리 계산), word=음성 엔진의 단어 알림, 둘 다 없으면 말소리 박자.
+const talk = { startedAt: 0, audio: null, env: null, word: null, sawWord: false };
+const blinker = A.createBlinker();
+const micMeter = A.createLevelMeter();
+let micLevel = 0;        // 사용자 목소리 크기(0~1). 들을 때 캐릭터가 귀 기울이듯 커진다.
+let micLevelAt = 0;
+function feedMic(rms) { micLevel = micMeter.push(rms); micLevelAt = performance.now(); }
+function mouthNow(now) {
+  if (reducedMotion) return 'half';
+  if (talk.audio && talk.env) return A.levelMouth(A.envelopeAt(talk.env, talk.audio.currentTime * 1000));
+  if (talk.sawWord && talk.word) return A.wordMouth(now - talk.word.at, talk.word.len);
+  return A.syllableMouth(now - talk.startedAt);
+}
+function playOnce(cls) {
+  if (reducedMotion || asleep()) return;
+  const fx = $('#face .fx');
+  fx.classList.remove('hop', 'nod');
+  void fx.offsetWidth; // 같은 움직임을 다시 시작하게
+  fx.classList.add(cls);
+}
+$('#face .fx').addEventListener('animationend', (e) => e.currentTarget.classList.remove('hop', 'nod'));
+let lastState = 'idle';
+function drawFace(now = performance.now()) {
   const state = currentState();
+  if (state !== lastState) {
+    if (state === 'speaking') { talk.startedAt = now; talk.word = null; talk.sawWord = false; }
+    if (lastState === 'speaking' && state !== 'listening') playOnce('nod'); // 답을 마치면 끄덕
+    lastState = state;
+  }
+  const mouth = state === 'speaking' ? mouthNow(now) : 'closed';
+  const blink = !reducedMotion && state !== 'speaking' && state !== 'thinking' && blinker.at(now);
   const box = $('#face');
-  const src = imageFor(state);
+  const body = $('#face-body');
+  const src = imageFor(state, { mouth, blink });
   if (src) {
-    let img = box.querySelector('img');
-    if (!img) { img = document.createElement('img'); img.alt = ''; box.replaceChildren(img); box.dataset.drawn = ''; }
+    let img = body.querySelector('img');
+    if (!img) { img = document.createElement('img'); img.alt = ''; body.replaceChildren(img); body.dataset.drawn = ''; }
     if (img.getAttribute('src') !== src) img.src = src;
   } else {
-    const html = A.renderAvatar(face.look, state, { mouth: A.mouthAt(state, performance.now(), { reducedMotion }), size: 208, name: face.name || 'JARVIS' });
-    if (box.dataset.drawn !== html) { box.innerHTML = html; box.dataset.drawn = html; }
+    const html = A.renderAvatar(face.look, state, { mouth: state === 'speaking' ? mouth : 'closed', blink, size: 208, name: face.name || 'JARVIS' });
+    if (body.dataset.drawn !== html) { body.innerHTML = html; body.dataset.drawn = html; }
   }
+  // 몸 움직임: 말할 때 입이 열린 만큼 들썩, 들을 때(또는 부르면 대답하기가 말소리를 담는 중) 목소리 크기만큼 커짐
+  const hearing = state === 'listening' || (state === 'idle' && amb.cap?.recording);
+  const lvl = !reducedMotion && hearing && now - micLevelAt < 300 ? micLevel : 0;
+  const talkAmt = reducedMotion ? 0 : A.mouthAmount(mouth);
+  const lvlText = lvl.toFixed(2); const talkText = talkAmt.toFixed(2);
+  if (body.style.getPropertyValue('--lvl') !== lvlText) body.style.setProperty('--lvl', lvlText);
+  if (body.style.getPropertyValue('--talk') !== talkText) body.style.setProperty('--talk', talkText);
   box.setAttribute('aria-label', `${face.name || 'JARVIS'} 얼굴, ${STATE_TEXT[state] ?? state}`);
   if (box.dataset.state !== state) box.dataset.state = state;
+  if (box.dataset.mouth !== mouth) box.dataset.mouth = mouth; // 시험·점검용 표시
   const st = $('#state');
   const text = `${face.name || 'JARVIS'} · ${STATE_TEXT[state] ?? state}`;
   if (st.lastChild.textContent !== text) { st.lastChild.textContent = text; st.dataset.state = state; }
@@ -707,6 +758,8 @@ let pcSpeakSeq = 0;
 function stopPcVoice() {
   pcSpeakSeq += 1;
   if (pcAudio) { try { pcAudio.pause(); URL.revokeObjectURL(pcAudio.src); } catch { /* 무시 */ } pcAudio = null; }
+  talk.audio = null;
+  talk.env = null;
 }
 const needPcVoice = () => !appSpeech() && !(synth && koreanVoice());
 async function speakWithPc(words) {
@@ -715,11 +768,15 @@ async function speakWithPc(words) {
   try {
     const res = await fetch('/api/tts', { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': 'application/json' }, body: JSON.stringify({ text: words.slice(0, 2000) }) });
     if (!res.ok || seq !== pcSpeakSeq) return;
-    const url = URL.createObjectURL(await res.blob());
-    if (seq !== pcSpeakSeq) { URL.revokeObjectURL(url); return; }
+    const bytes = await res.arrayBuffer();
+    if (seq !== pcSpeakSeq) return;
+    const url = URL.createObjectURL(new Blob([bytes], { type: 'audio/wav' }));
     const a = new Audio(url);
     pcAudio = a;
-    const end = () => { if (pcAudio === a) { URL.revokeObjectURL(url); pcAudio = null; face.deviceSpeaking = false; } };
+    // 립싱크: WAV의 소리 크기를 미리 계산해 두고, 재생 위치에 맞춰 입을 연다(소리를 다시 내거나 보내지 않음)
+    talk.audio = a;
+    talk.env = A.wavEnvelope(bytes);
+    const end = () => { if (pcAudio === a) { URL.revokeObjectURL(url); pcAudio = null; talk.audio = null; talk.env = null; face.deviceSpeaking = false; } };
     a.onplaying = () => { face.deviceSpeaking = true; };
     a.onended = end;
     a.onerror = end;
@@ -748,6 +805,13 @@ function speak(text) {
   u.rate = 1.0;
   u.pitch = 1.3; // 조금 높고 귀여운 목소리
   u.onstart = () => { face.deviceSpeaking = true; };
+  // 단어 알림이 오는 음성 엔진이면 단어 박자로 입을 연다(글자 수 = 그 단어 길이)
+  u.onboundary = (e) => {
+    if (e.name && e.name !== 'word') return;
+    const len = e.charLength || ((words.slice(e.charIndex).search(/\s/) + 1 || words.length - e.charIndex + 1) - 1);
+    talk.word = { at: performance.now(), len };
+    talk.sawWord = true;
+  };
   u.onend = () => { face.deviceSpeaking = false; };
   u.onerror = () => { face.deviceSpeaking = false; };
   synth.speak(u);
@@ -761,7 +825,15 @@ $('#voice').addEventListener('click', () => {
 });
 showVoiceButton();
 
-setInterval(() => { if (!document.hidden && !asleep()) drawFace(); }, 120);
+// 얼굴은 1초에 약 30번 다시 그린다(입·눈·몸). 화면이 숨겨지면 브라우저가 알아서 멈춘다.
+let lastDraw = 0;
+function faceFrame(t) {
+  requestAnimationFrame(faceFrame);
+  if (asleep() || t - lastDraw < 33) return;
+  lastDraw = t;
+  drawFace(t);
+}
+requestAnimationFrame(faceFrame);
 let nextPoll = 0;
 setInterval(() => {
   if (document.hidden || asleep()) return;
@@ -891,7 +963,7 @@ async function micStop() {
   const ms = mic.cap.recordedMs;
   const wav = mic.cap.stop();
   micReset();
-  if (!mic.heard && mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 이 기기 내장 마이크는 지금 쓸 수 없어요. USB 마이크를 꽂고 다시 눌러 주세요.'); return; }
+  if (!mic.heard && mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 앱의 마이크 권한(‘이번만 허용’은 곧 풀려요)을 확인하고, 그래도 0이면 USB 마이크를 꽂아 주세요.'); return; }
   if (!mic.heard || ms < 300) { status('말소리를 듣지 못했어요. 마이크 가까이에서 다시 말해 주세요.'); return; }
   status('받아 적는 중이에요…');
   try {
@@ -915,6 +987,7 @@ async function micStart() {
     return;
   }
   stopSpeaking(); // 이 기기에서 읽던 답을 멈춘다(끼어들기)
+  playOnce('hop'); // 말하기를 누르면 깡충
   api('POST', '/api/voice/stop').catch(() => {});
   mic.ctx = new AudioContext();
   const src = mic.ctx.createMediaStreamSource(mic.stream);
@@ -941,7 +1014,9 @@ async function micStart() {
   mic.timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
     if (mic.silentHw && buf.some((x) => x !== 0)) mic.silentHw = false;
-    const ev = mic.seg.push(V.rmsOf(buf), performance.now());
+    const rms = V.rmsOf(buf);
+    feedMic(rms);
+    const ev = mic.seg.push(rms, performance.now());
     if (ev === 'start') mic.heard = true;
     else if (ev === 'end' && mic.heard) micStop();
     else if (!mic.heard && performance.now() - mic.startedAt > 8000) micStop(); // 8초 동안 말이 없으면 멈춤
@@ -992,7 +1067,9 @@ async function ambientStartMic() {
     if (!amb.seg) return;
     analyser.getFloatTimeDomainData(buf);
     const t = performance.now();
-    const ev = amb.seg.push(V.rmsOf(buf), t);
+    const rms = V.rmsOf(buf);
+    feedMic(rms);
+    const ev = amb.seg.push(rms, t);
     if (ev === 'start') { amb.cap.start({ preRoll: true }); amb.utterStart = t; }
     // 기기가 말하는 중에는 3초까지만 담아 "멈춰"가 빨리 처리되게 한다
     const cut = amb.cap.recording && face.deviceSpeaking && t - amb.utterStart > 3000;
@@ -1029,6 +1106,7 @@ function ambientSend(wav, utterMs, endedAt) {
     }
     if (r.addressed && r.question) {
       woke(presence.activity(performance.now()));
+      playOnce('hop'); // 이름을 부르면 깡충
       if (asleep()) applyPresence();
       ask(r.question, { ambient: true });
     }
@@ -1172,7 +1250,7 @@ async function buildChecks() {
         meter.firstChild.style.width = `${Math.min(100, Math.round(r * 400))}%`;
         if (performance.now() - t0 > 3000) {
           clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); ctx.close(); meter.firstChild.style.width = '0';
-          if (!any) { set('mic', 'bad', `열렸지만 신호가 전혀 없어요(소리 크기 0, ${label}). 내장 마이크가 연결돼 있지 않거나 꺼져 있어요. USB 마이크를 꽂아 주세요.`); e.target.disabled = false; return; }
+          if (!any) { set('mic', 'bad', `열렸지만 신호가 전혀 없어요(소리 크기 0, ${label}). 마이크 권한이 풀렸거나 기기 마이크 경로가 꺼져 있어요. 권한을 ‘앱 사용 중에만 허용’으로 두고, 그래도 0이면 USB 마이크를 꽂아 주세요.`); e.target.disabled = false; return; }
           set('mic', peak > 0.02 ? 'ok' : 'warn', peak > 0.02 ? `소리 들림 (${label}, 최대 ${peak.toFixed(3)})` : `열렸지만 소리가 거의 없어요 (${label}, 최대 ${peak.toFixed(3)}). 말하면서 다시 시험해 보세요.`);
           e.target.disabled = false;
         }
@@ -1294,6 +1372,7 @@ function woke(changed, who = null) {
   if (!changed && !who) return;
   const was = asleep();
   applyPresence();
+  if (was) setTimeout(() => playOnce('hop'), 350); // 쉬는 화면에서 깨면 깡충(화면이 밝아진 뒤)
   if (who) say(`${who.name}님, 어서 와요! 무엇을 도와줄까요?`);
   else if (was || presence.reason !== 'touch') say('어서 와요! 무엇을 도와줄까요?');
   if (was) setTimeout(briefingHint, 2500);
@@ -1311,7 +1390,8 @@ function nearNow() {
 }
 window.addEventListener('jarvis-app', (e) => {
   const d = e.detail ?? {};
-  if (d.type === 'tts') face.deviceSpeaking = d.state === 'start';
+  if (d.type === 'tts' && d.state === 'range') { talk.word = { at: performance.now(), len: Math.max(1, (d.end ?? 0) - (d.start ?? 0)) }; talk.sawWord = true; } // 앱이 단어 위치를 알려 줄 때(앱이 지원하면)
+  else if (d.type === 'tts') face.deviceSpeaking = d.state === 'start';
   else if (d.type === 'proximity' && d.near) nearNow();
 });
 function startProximity() {

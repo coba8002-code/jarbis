@@ -1,5 +1,6 @@
 // 캐릭터 그림 얼굴(2026-11-14 사용자 요청). 사용자가 직접 넣은 그림을 상태별로 보여 준다.
-// - 상태: 대기(idle)·듣는 중(listening)·생각 중(thinking)·말하는 중(speaking, speaking2를 번갈아 보여 입이 움직이게).
+// - 상태: 대기(idle)·듣는 중(listening)·생각 중(thinking)·말하는 중(speaking 입 크게, speaking2 입 작게, speaking3 입 다묾)·
+//   눈 깜빡임(blink, 대기 모습에서 눈만 감음). speaking3·blink는 없어도 된다(없으면 speaking2·대기 그림으로 대신).
 // - 그림은 이 기기 데이터 폴더(avatars/<캐릭터 번호>/<상태>.<확장자>)에만 둔다. 어디에도 보내지 않는다.
 // - 파일 내용의 앞부분(시그니처)으로 PNG·JPEG·GIF·WebP만 받는다(확장자·머리글을 믿지 않음). 한 장 최대 5MB.
 // - 쓸 권리가 있는 그림만 넣도록 화면에서 안내하고, 출처·이용 조건은 캐릭터 자산 기록에 남긴다.
@@ -7,7 +8,7 @@ import { mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, 
 import { join } from 'node:path';
 import { AppError } from '../errors.js';
 
-export const IMAGE_STATES = ['idle', 'listening', 'thinking', 'speaking', 'speaking2'];
+export const IMAGE_STATES = ['idle', 'listening', 'thinking', 'speaking', 'speaking2', 'speaking3', 'blink'];
 export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 const TYPES = { png: 'image/png', jpg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp' };
 

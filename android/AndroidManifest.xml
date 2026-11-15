@@ -3,8 +3,8 @@
      화면은 PC의 JARVIS 서버(/jarvis)를 그대로 쓰고, 앱은 근접 센서·기기 음성(TTS)·화면 밝기만 더해 준다. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.jarvishybrid.app"
-    android:versionCode="4"
-    android:versionName="0.2.2">
+    android:versionCode="6"
+    android:versionName="0.2.4">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
@@ -47,5 +47,9 @@
         </receiver>
         <!-- 마이크 진단(adb 전용): DUMP 권한은 adb shell만 갖고 있어 다른 앱은 부를 수 없다 -->
         <receiver android:name=".MicProbe" android:exported="true" android:permission="android.permission.DUMP" />
+        <!-- 카메라·센서·스피커 점검(adb 전용, 같은 DUMP 보호) -->
+        <receiver android:name=".HwProbe" android:exported="true" android:permission="android.permission.DUMP" />
+        <!-- 연결 설정(PC 주소·인증서 지문)을 adb로 넣기. 재설치 뒤 화면에서 다시 치지 않게 -->
+        <receiver android:name=".ConfigReceiver" android:exported="true" android:permission="android.permission.DUMP" />
     </application>
 </manifest>
