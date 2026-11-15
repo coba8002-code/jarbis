@@ -357,6 +357,9 @@ import * as A from '/static/avatar.js';
 import * as V from '/static/voice-input.js';
 import * as P from '/static/presence.js';
 import * as F from '/static/faces.js';
+import { mountDeck } from '/static/deck.js';
+import * as M from '/static/motion.js';
+import { mountIdleBoard } from '/static/idle-board.js';
 
 const TOKEN = document.querySelector('meta[name="jarvis-token"]').content;
 const $ = (s) => document.querySelector(s);
@@ -455,14 +458,14 @@ function mouthNow(now) {
   if (talk.sawWord && talk.word) return A.wordMouth(now - talk.word.at, talk.word.len);
   return A.syllableMouth(now - talk.startedAt);
 }
-function playOnce(cls) {
-  if (reducedMotion || asleep()) return;
-  const fx = $('#face .fx');
-  fx.classList.remove('hop', 'nod');
-  void fx.offsetWidth; // 같은 움직임을 다시 시작하게
-  fx.classList.add(cls);
-}
-$('#face .fx').addEventListener('animationend', (e) => e.currentTarget.classList.remove('hop', 'nod'));
+// 캐릭터 모션(motion.js, 기획: docs/CHARACTER_MOTION.md): 한 번 하는 동작 16가지·잔동작·감정 표시·얼굴 누르기·친구별 성격
+const motion = M.createMotion({
+  fx: $('#face .fx'), face: $('#face'), scene: $('.scene'), reducedMotion, isAsleep: asleep,
+  getState: () => currentState(), getName: () => face.name, isBusy: () => face.chatPending,
+  // 얼굴을 누르면 짧은 말을 2.5초만 띄운다(소리 없음)
+  say: (t) => { say(t); setTimeout(() => { if ($('#say').textContent === t) say(''); }, 2500); },
+});
+function playOnce(cls) { motion.play(cls); }
 let lastState = 'idle';
 function drawFace(now = performance.now()) {
   const state = currentState();
@@ -584,6 +587,7 @@ async function choosePal(c) {
     await refreshVoice();
     await renderPals();
     say('');
+    motion.play('popin'); // 새 친구가 뿅 하고 나타남
     status(`이제 ${c.name} 차례예요.`);
   } catch (e) { note('친구를 바꾸지 못했어요. 잠시 뒤 다시 눌러 주세요.', String(e.message)); }
 }
@@ -844,6 +848,7 @@ setInterval(() => {
 
 // ---------- 대화 ----------
 let provider = null;
+let providerModel = null; // 메인 화면에서 고른 Ollama 모델(라마 등). null이면 서버 기본 모델
 function add(kind, text) {
   const div = document.createElement('div');
   div.className = `msg ${kind}`;
@@ -871,6 +876,7 @@ function note(text, details) {
   return div;
 }
 async function pickProvider() {
+  if (provider) return; // 바로 가기 줄의 "AI"에서 이미 골랐음(deck.js setAi)
   const list = await api('GET', '/api/providers');
   // 이 기기 안 공급자만 쓴다(자비스 모드에서는 외부로 보내지 않음). Ollama가 있으면 Ollama.
   provider = (list.find((p) => p.name === 'ollama' && !p.remote) ?? list.find((p) => !p.remote))?.name ?? null;
@@ -914,11 +920,12 @@ async function ask(question, { ambient = false } = {}) {
   say('…');
   const { line, bubble } = addBotLine();
   try {
-    const r = await api('POST', '/api/chat', { provider, question, memoryIds: [], ...(ambient ? { ambient: true } : {}) });
+    const r = await api('POST', '/api/chat', { provider, question, memoryIds: [], ...(providerModel ? { model: providerModel } : {}), ...(ambient ? { ambient: true } : {}) });
     if (r.status === 'sent' && !r.reply.discarded) {
       face.chatPending = false;
       countTalk();
       say(r.reply.text);
+      motion.react(r.reply.text); // 답 내용에 맞춰 콩콩·수줍·시무룩·둠칫·갸웃
       speak(r.reply.text); // 읽기 시작과 글자 보이기를 함께
       await typeOut(bubble, r.reply.text);
       if (r.skill && !r.skill.asked) note(r.skill.failed ? `${r.skill.name} 조회에 실패해 확인하지 못했어요.` : `k-skill ${r.skill.name}로 찾아봤어요.`);
@@ -930,6 +937,7 @@ async function ask(question, { ambient = false } = {}) {
   } catch (e) {
     line.remove();
     say('');
+    motion.play('sad');
     note('답을 받지 못했어요. 잠시 뒤 다시 보내 주세요.', String(e.message));
   } finally {
     face.chatPending = false;
@@ -940,7 +948,7 @@ async function ask(question, { ambient = false } = {}) {
 $('#bar').addEventListener('submit', (e) => { e.preventDefault(); unlockSpeech(); ask($('#q').value); });
 $('#q').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); unlockSpeech(); ask($('#q').value); } });
 $('#q').addEventListener('input', () => status(''));
-$('#stop').addEventListener('click', async () => { stopSpeaking(); say(''); try { await api('POST', '/api/voice/stop'); } catch { /* 무시 */ } nextPoll = 0; status('말하던 것을 멈췄어요.'); });
+$('#stop').addEventListener('click', async () => { stopSpeaking(); say(''); motion.play('startle'); try { await api('POST', '/api/voice/stop'); } catch { /* 무시 */ } nextPoll = 0; status('말하던 것을 멈췄어요.'); });
 
 // ---------- 말하기(누르면 녹음, 말이 끝나면 자동으로 멈추고 받아 적어 보냄) ----------
 // 마이크는 보안 연결(HTTPS 또는 이 기기 주소)에서만 브라우저가 허락한다.
@@ -994,6 +1002,7 @@ const MIC_FORCE_MS = 6000;
 // 녹음 길이가 실제의 약 4배가 됐다(2026-11-15 토스 프론트).
 async function micStart() {
   if (mic.opening || mic.stream) return;
+  if (typeof deck !== 'undefined' && deck?.meetingActive()) { status('회의 녹음 중이에요. 회의를 끝낸 뒤에 말해 주세요.'); return; } // 회의 녹음 중에는 말하기 마이크를 열지 않음
   mic.opening = true;
   try { await micOpen(); } finally { mic.opening = false; }
 }
@@ -1388,6 +1397,9 @@ const noProxApp = Boolean(app && app.hasProximity && app.hasProximity() === fals
 let camWake = camUsable && (savedCamWake === 'on' || (noProxApp && savedCamWake !== 'off'));
 let glancing = false;
 let camBusy = false; // 카메라를 한 곳에서만 쓰게(잠깐 보기·등록·누구인지 보기)
+let camFails = 0; // 카메라를 연달아 못 연 횟수(잠깐 다른 앱이 쓰는 중이면 다음에 다시 봄)
+let deck = null; // (아래) deck: 단축키 판·일정 화면(mountDeck)
+let board = null; // (아래) board: 대기화면 보드(mountIdleBoard)
 const grabCanvas = document.createElement('canvas');
 grabCanvas.width = 32; grabCanvas.height = 24;
 const grabCtx = grabCanvas.getContext('2d', { willReadFrequently: true });
@@ -1412,8 +1424,10 @@ function applyPresence() {
     stopSpeaking();
     sleepHint(); showClock();
     clockTimer = setInterval(showClock, 30_000);
+    board?.show(); // 대기화면: 조는 캐릭터·날씨·오늘 중요한 일·해야 할 일
     $('#sleep').focus();
   } else {
+    board?.hide();
     nextPoll = 0;
     refreshTiles();
   }
@@ -1423,7 +1437,7 @@ function woke(changed, who = null) {
   if (!changed && !who) return;
   const was = asleep();
   applyPresence();
-  if (was) setTimeout(() => playOnce('hop'), 350); // 쉬는 화면에서 깨면 깡충(화면이 밝아진 뒤)
+  if (was) setTimeout(() => motion.wake(), 350); // 쉬는 화면에서 깨면 기지개 → 깡충(화면이 밝아진 뒤)
   if (who) say(`${who.name}님, 어서 와요! 무엇을 도와줄까요?`);
   else if (was || presence.reason !== 'touch') say('어서 와요! 무엇을 도와줄까요?');
   if (was) setTimeout(briefingHint, 2500);
@@ -1475,25 +1489,35 @@ async function glance() {
   let stream = null;
   try {
     const big = people.length > 0;
-    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: big ? 320 : 160 }, height: { ideal: big ? 240 : 120 }, frameRate: { ideal: 5, max: 10 }, facingMode: 'user' } });
+    // 2026-11-15: 160×120에서는 얼굴이 너무 작아 "얼굴 없음"이 나와 깨어나지 않았다(기기 신고). 늘 320×240으로 본다.
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { width: { ideal: 320 }, height: { ideal: 240 }, frameRate: { ideal: 5, max: 10 }, facingMode: 'user' } });
     const video = document.createElement('video');
     video.muted = true; video.playsInline = true; video.srcObject = stream;
     await video.play();
     await pause(700); // 카메라가 밝기를 맞출 시간
     const first = grab(video);
-    await pause(400);
+    const faceA = await faceVisible(video); // 첫 장면에서도 얼굴 확인(걸어 들어오며 흔들린 장면을 놓치지 않게)
+    await pause(faceA === true ? 0 : 400);
     const second = grab(video);
-    const faceSeen = await faceVisible(video); // 얼굴 확인(모델 없으면 null → 움직임만으로)
+    const faceB = faceA === true ? true : await faceVisible(video);
+    const faceSeen = faceA === true || faceB === true ? true : (faceA === false || faceB === false ? false : null); // 모델 없으면 null → 움직임만으로
     const r = presence.glance(performance.now(), first, second, faceSeen);
     console.info(`[presence] cam person=${r.person} face=${faceSeen} move=${Math.round(r.moving)} scene=${Math.round(r.changed)} -> ${presence.state}`);
     if (r.changedState) {
       if (presence.state === 'awake') woke(true, big && r.person ? await whoIs(video) : null);
       else applyPresence(); // 사람이 떠나 쉬는 화면으로
     }
+    camFails = 0;
   } catch (e) {
-    // 권한 거부·카메라 없음·다른 앱이 사용 중: 카메라로 깨우기를 끈다
-    setCamWake(false);
-    status(e.name === 'NotAllowedError' ? '카메라 사용이 거부돼 카메라로 깨우기를 껐어요.' : '카메라를 열지 못해 카메라로 깨우기를 껐어요.');
+    // 권한 거부·카메라 없음이면 끈다. 다른 앱이 잠깐 쓰는 중 같은 일시 오류는 다음 차례에 다시 보고, 3번 연달아 실패할 때만 끈다.
+    camFails += 1;
+    const fatal = e.name === 'NotAllowedError' || e.name === 'SecurityError' || e.name === 'NotFoundError';
+    console.info(`[presence] cam error ${e.name ?? e} fails=${camFails}`);
+    if (fatal || camFails >= 3) {
+      setCamWake(false);
+      camFails = 0;
+      status(e.name === 'NotAllowedError' ? '카메라 사용이 거부돼 카메라로 깨우기를 껐어요.' : '카메라를 열지 못해 카메라로 깨우기를 껐어요.');
+    }
   } finally {
     stream?.getTracks().forEach((t) => t.stop());
     glancing = false;
@@ -1705,7 +1729,7 @@ if (camUsable) { $('#faces-card').hidden = false; renderPeople(); }
 setInterval(() => {
   const t = performance.now();
   // 쓰는 중(누름·말하기·듣기·답 읽기·등록·고르기)이면 사람 있음으로 보고, 카메라도 켜지 않는다(마이크 충돌·전력)
-  const busy = currentState() !== 'idle' || face.chatPending || !$('#check').hidden || $('#picker').open || !$('#face-form').hidden;
+  const busy = currentState() !== 'idle' || face.chatPending || !$('#check').hidden || deck?.busy() || $('#picker').open || !$('#face-form').hidden;
   if (busy) presence.activity(t);
   if (presence.tick(t)) applyPresence();
   if (camWake && !glancing && !document.hidden && !busy && presence.shouldGlance(t)) glance();
@@ -1716,8 +1740,47 @@ showTalkCount();
 showHello();
 await refreshVoice();
 drawFace();
+motion.hello(); // 처음 열 때 뿅 → 흔들흔들 인사
 refreshTiles();
 setInterval(() => { if (!document.hidden && !asleep()) refreshTiles(); }, 30000);
+// 대기화면 보드(idle-board.js): 잠든 얼굴은 눈 감은 그림(blink), 깜짝 놀랄 때만 눈 뜬 그림. 그림이 없으면 도형 얼굴.
+board = mountIdleBoard({
+  api, reducedMotion,
+  faces: () => ({
+    sleep: imageFor('idle', { blink: true }), awake: imageFor('idle'),
+    svgSleep: A.renderAvatar(face.look, 'idle', { blink: true, size: 160, name: face.name || 'JARVIS' }),
+    svgAwake: A.renderAvatar(face.look, 'idle', { size: 160, name: face.name || 'JARVIS' }),
+  }),
+});
+// 단축키 판 + 일정·할 일 바로 보기(deck.js). 구글에 쓰는 일은 확인 창(주황 단추)을 거친다.
+deck = mountDeck({
+  api,
+  token: TOKEN,
+  // 회의 녹음(캐릭터 아래 회의 버튼): 말하기 중이면 시작하지 않고, 녹음하는 동안 부르면 대답하기 마이크를 쉰다
+  beforeMeeting: () => {
+    if (mic.opening || mic.stream) { status('말하기를 끝낸 뒤에 회의를 녹음할 수 있어요.'); return false; }
+    ambientPause();
+    return true;
+  },
+  afterMeeting: () => ambientResume(),
+  note: (t) => note(t),
+  refreshTiles,
+  app,
+  // 바로 가기 줄 "AI": Claude·Codex(OpenAI)·Grok·로컬(Ollama 모델)·Llama 중 고른 것으로 대화(외부는 질문 글만 감)
+  setAi: ({ provider: p, model }) => { provider = p; providerModel = p === 'ollama' ? (model ?? null) : null; },
+  ask: (text) => { unlockSpeech(); ask(text); },
+  toggleVoice: () => { if ($('#voice').hidden) status('이 기기에서는 소리 켜고 끄기를 쓸 수 없어요.'); else $('#voice').click(); },
+  stop: () => $('#stop').click(),
+  playBriefing: () => { unlockSpeech(); $('#brief-play').click(); },
+  showCheck,
+  openPicker,
+  motion: (name) => motion.play(name), // 단축키 성공 콩콩, 할 일 완료·추가 만세 점프
+  confirm: async ({ primary, ...rest }) => {
+    const okBtn = $('#confirm-ok');
+    if (primary) okBtn.className = 'btn btn-primary';
+    try { return await askConfirm(rest); } finally { okBtn.className = 'btn btn-danger'; }
+  },
+});
 try { await pickProvider(); } catch (e) { note('대화 모델 목록을 불러오지 못했어요. 잠시 뒤 새로 고쳐 주세요.', String(e.message)); }
 const hint = document.createElement('div');
 hint.className = 'empty';

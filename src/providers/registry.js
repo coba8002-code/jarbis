@@ -27,7 +27,8 @@ export class ProviderRegistry {
   describe(name) {
     const provider = this.providers[name];
     if (!provider) throw new ProviderError('not_configured', name, `공급자 ${name} 없음`);
-    return { name, baseUrl: 'unknown', model: null, remote: true, ...(provider.describe?.() ?? {}) };
+    // 설정이 없는 자리 표시자는 화면에서 고를 수 없게 ready:false로 알린다(AI 고르기, 2026-11-15)
+    return { name, baseUrl: 'unknown', model: null, remote: true, ...(provider.describe ? {} : { ready: false, reason: '연결되지 않음' }), ...(provider.describe?.() ?? {}) };
   }
 
   names() {

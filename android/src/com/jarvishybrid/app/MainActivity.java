@@ -2,6 +2,7 @@ package com.jarvishybrid.app;
 
 import android.Manifest;
 import android.app.Activity;
+import android.app.AlertDialog;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.graphics.Color;
@@ -51,6 +52,7 @@ import java.util.Locale;
  * - 보안: 정한 서버 주소(https)만 열고, 서버의 자체 서명 인증서는 PC 화면에 나온 SHA-256 지문과 같을 때만 믿는다.
  * - 권한: 그 서버 화면이 카메라·마이크를 달라고 할 때만 안드로이드 권한을 묻고 준다.
  * - 화면에 더해 주는 것(window.JarvisApp): 근접 센서, 기기 음성(TTS), 쉬는 화면일 때 밝기 낮추기, 연결 설정 다시 열기.
+ * - 저장된 서버(2026-11-15): 이름 붙인 서버(주소+지문)를 목록에 두고 한 번 눌러 바꾼다(ServerList, ConfigReceiver의 name).
  */
 public class MainActivity extends Activity implements SensorEventListener {
     private BtMic btMic;
@@ -142,6 +144,52 @@ public class MainActivity extends Activity implements SensorEventListener {
         TextView about = text("PC에서 JARVIS를 --https로 켜면 나오는 주소와 인증서 지문(SHA-256)을 적어 주세요. 이 주소의 자비스 모드만 열고, 지문이 맞는 인증서만 믿어요.", 14, MUTED, false);
         about.setPadding(0, dp(8), 0, dp(24));
         box.addView(about);
+        // 저장된 서버: 누르면 바로 그 서버로, 길게 누르면 목록에서 지우기
+        String current = prefs.getString("server", "");
+        List<ServerList.Entry> saved = ServerList.load(prefs);
+        if (!saved.isEmpty()) {
+            box.addView(text("저장된 서버", 14, TEXT, true));
+            TextView how = text("누르면 그 서버로 바꿔요. 길게 누르면 목록에서 지워요.", 12, MUTED, false);
+            how.setPadding(0, dp(4), 0, dp(8));
+            box.addView(how);
+            for (ServerList.Entry e : saved) {
+                boolean now = e.server.equalsIgnoreCase(current);
+                Button b = new Button(this);
+                b.setAllCaps(false);
+                b.setGravity(Gravity.START | Gravity.CENTER_VERTICAL);
+                b.setText(e.name + (now ? "  · 지금 연결" : "") + "\n" + e.server);
+                b.setTextColor(TEXT);
+                b.setTextSize(TypedValue.COMPLEX_UNIT_SP, 15);
+                GradientDrawable bg = new GradientDrawable();
+                bg.setColor(now ? Color.rgb(0xff, 0xed, 0xd5) : Color.WHITE);
+                bg.setStroke(dp(now ? 2 : 1), now ? ACCENT : Color.argb(0x1f, 0x3c, 0x28, 0x14));
+                bg.setCornerRadius(dp(16));
+                b.setBackground(bg);
+                b.setPadding(dp(16), dp(10), dp(16), dp(10));
+                LinearLayout.LayoutParams blp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+                blp.bottomMargin = dp(8);
+                b.setLayoutParams(blp);
+                b.setMinHeight(dp(56));
+                b.setOnClickListener(v -> {
+                    prefs.edit().putString("server", e.server).putString("pin", e.pin).apply();
+                    pin = e.pin;
+                    showWeb(e.server);
+                });
+                b.setOnLongClickListener(v -> {
+                    new AlertDialog.Builder(this)
+                            .setTitle("\"" + e.name + "\"을(를) 목록에서 지울까요?")
+                            .setMessage("저장된 서버 목록에서만 지워요. 지금 연결 설정은 그대로예요.")
+                            .setNegativeButton("취소", null)
+                            .setPositiveButton("목록에서 지우기", (d, w) -> { ServerList.remove(prefs, e.server); showSetup(null, false); })
+                            .show();
+                    return true;
+                });
+                box.addView(b);
+            }
+            TextView or = text("또는 새 서버 적기", 14, TEXT, true);
+            or.setPadding(0, dp(16), 0, 0);
+            box.addView(or);
+        }
         box.addView(text("PC 주소", 14, TEXT, true));
         EditText server = field(prefs.getString("server", ""), "예: https://192.168.0.53:47989");
         box.addView(server);
@@ -155,6 +203,12 @@ public class MainActivity extends Activity implements SensorEventListener {
         box.addView(pinField);
         TextView pinErr = text("", 14, BAD, false);
         box.addView(pinErr);
+        TextView nameLabel = text("이름(선택, 적으면 저장된 서버에 넣어요)", 14, TEXT, true);
+        nameLabel.setPadding(0, dp(16), 0, 0);
+        box.addView(nameLabel);
+        EditText nameField = field("", "예: 개발 PC, 옆 PC");
+        nameField.setInputType(InputType.TYPE_CLASS_TEXT);
+        box.addView(nameField);
         if (message != null) {
             TextView m = text(autoRetry ? message + " " + (RETRY_MS / 1000) + "초마다 다시 연결해 볼게요(칸을 누르면 멈춤)." : message, 14, BAD, false);
             m.setPadding(0, dp(16), 0, 0);
@@ -191,10 +245,29 @@ public class MainActivity extends Activity implements SensorEventListener {
             pinErr.setText(pe);
             if (!se.isEmpty() || !pe.isEmpty()) return;
             prefs.edit().putString("server", s).putString("pin", p).apply();
+            String nm = nameField.getText().toString().trim();
+            if (!nm.isEmpty()) ServerList.upsert(prefs, nm, s, p);
             pin = p;
             showWeb(s);
         });
         box.addView(go);
+        // 화면에서 "서버" 버튼으로 들어왔으면 바꾸지 않고 돌아가기
+        if (message == null && validServer(current) && normalizePin(prefs.getString("pin", "")).length() == 64) {
+            Button back = new Button(this);
+            back.setText("바꾸지 않고 돌아가기");
+            back.setAllCaps(false);
+            back.setTextColor(TEXT);
+            GradientDrawable bb = new GradientDrawable();
+            bb.setColor(Color.WHITE);
+            bb.setStroke(dp(1), Color.argb(0x1f, 0x3c, 0x28, 0x14));
+            bb.setCornerRadius(dp(24));
+            back.setBackground(bb);
+            LinearLayout.LayoutParams backLp = new LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52));
+            backLp.topMargin = dp(12);
+            back.setLayoutParams(backLp);
+            back.setOnClickListener(v -> { pin = prefs.getString("pin", ""); showWeb(current); });
+            box.addView(back);
+        }
         ScrollView scroll = new ScrollView(this);
         scroll.setBackgroundColor(BG);
         scroll.addView(box);

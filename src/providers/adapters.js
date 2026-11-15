@@ -9,7 +9,11 @@ export const PROVIDER_DEFAULTS = {
   claude: { baseUrl: 'https://api.anthropic.com', keyEnv: 'ANTHROPIC_API_KEY', model: 'claude-opus-5-5' },
   grok: { baseUrl: 'https://api.x.ai/v1', keyEnv: 'XAI_API_KEY', model: null },
   ollama: { baseUrl: 'http://127.0.0.1:11434', keyEnv: null, model: null },
+  // llama.cpp llama-server(OpenAI 호환). 모델 이름은 서버가 무시하므로 기본 'local'. 바꾸려면 JARVIS_LLAMA_BASE_URL·JARVIS_LLAMA_MODEL.
+  llama: { baseUrl: 'http://127.0.0.1:8080/v1', keyEnv: null, model: 'local' },
 };
+// 화면에 보일 이름(2026-11-15: 메인 화면에서 AI 고르기)
+export const PROVIDER_LABELS = { claude: 'Claude', openai: 'Codex(OpenAI)', grok: 'Grok', ollama: '로컬(Ollama)', llama: 'Llama(llama.cpp)' };
 
 const ANTHROPIC_VERSION = '2026-10-21';
 
@@ -49,9 +53,9 @@ function openAiCompatible(name, env, fetchImpl) {
       const { baseUrl, model, key } = resolve(name, env, request, expect);
       const res = await send(name, fetchImpl, `${baseUrl}/chat/completions`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json', authorization: `Bearer ${key}` },
+        headers: { 'content-type': 'application/json', ...(key ? { authorization: `Bearer ${key}` } : {}) },
         body: JSON.stringify({ model, messages: request.messages, stream: true }),
-      }, { signal, secrets: [key] });
+      }, { signal, secrets: key ? [key] : [] });
       let finish = null;
       for await (const ev of readSse(name, res.body, signal)) {
         if (ev.data === '[DONE]') {
@@ -166,11 +170,22 @@ function ollama(env, fetchImpl) {
   };
 }
 
+// 네트워크 없이 바로 쓸 수 있는지 본다(키 값은 읽기만 하고 내보내지 않음). 실패 이유는 고칠 설정 이름만 알린다.
+export function readiness(name, env) {
+  const d = PROVIDER_DEFAULTS[name];
+  const baseUrl = (env[envName(name, 'BASE_URL')] ?? d.baseUrl).replace(/\/+$/, '');
+  const model = env[envName(name, 'MODEL')] ?? d.model ?? null;
+  if (!model) return { ready: false, reason: `모델 이름이 없음(${envName(name, 'MODEL')})` };
+  if (!isLoopback(baseUrl) && env.JARVIS_ALLOW_REMOTE !== '1') return { ready: false, reason: '외부 전송이 꺼져 있음(JARVIS_ALLOW_REMOTE=1 필요)' };
+  if (d.keyEnv && !env[d.keyEnv]) return { ready: false, reason: `키가 없음(${d.keyEnv})` };
+  return { ready: true, reason: '' };
+}
+
 // 보낼 주소와 외부 여부. 루프백이 아니면 외부로 본다(Ollama 포함).
 function describeFor(name, env) {
   const baseUrl = (env[envName(name, 'BASE_URL')] ?? PROVIDER_DEFAULTS[name].baseUrl).replace(/\/+$/, '');
   const model = env[envName(name, 'MODEL')] ?? PROVIDER_DEFAULTS[name].model;
-  return { name, baseUrl, model, remote: !isLoopback(baseUrl) };
+  return { name, label: PROVIDER_LABELS[name] ?? name, baseUrl, model, remote: !isLoopback(baseUrl), ...readiness(name, env) };
 }
 
 export function createHttpProviders({ env = process.env, fetchImpl = globalThis.fetch } = {}) {
@@ -179,6 +194,18 @@ export function createHttpProviders({ env = process.env, fetchImpl = globalThis.
     claude: claude(env, fetchImpl),
     grok: openAiCompatible('grok', env, fetchImpl),
     ollama: ollama(env, fetchImpl),
+    llama: openAiCompatible('llama', env, fetchImpl),
+  };
+  // Ollama에 받아 둔 모델 목록(라마·젬마 등). 이 기기 안 주소일 때만 묻는다. 실패하면 빈 목록.
+  providers.ollama.models = async () => {
+    const baseUrl = (env[envName('ollama', 'BASE_URL')] ?? PROVIDER_DEFAULTS.ollama.baseUrl).replace(/\/+$/, '');
+    if (!isLoopback(baseUrl)) return [];
+    try {
+      const res = await fetchImpl(`${baseUrl}/api/tags`, { signal: AbortSignal.timeout(3000) });
+      if (!res.ok) return [];
+      const j = await res.json();
+      return (Array.isArray(j.models) ? j.models : []).map((m) => ({ name: String(m.name ?? ''), size: Number(m.size) || 0, family: String(m.details?.family ?? '') })).filter((m) => m.name);
+    } catch { return []; }
   };
   for (const [name, p] of Object.entries(providers)) {
     p.describe = () => describeFor(name, env);

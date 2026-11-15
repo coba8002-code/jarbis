@@ -216,6 +216,7 @@ export class MeetingStore {
   deleteTranscript(id) {
     this.#row(id);
     const n = this.db.prepare('DELETE FROM transcript_segments WHERE meeting_id = ?').run(id).changes;
+    this.db.prepare('DELETE FROM meeting_summaries WHERE meeting_id = ?').run(id); // 녹취에서 만든 정리도 함께
     scrub(this.db);
     return { id, segmentsDeleted: Number(n) };
   }
@@ -227,6 +228,7 @@ export class MeetingStore {
     this.deleteAudio(id);
     this.#inTx(() => {
       this.db.prepare('DELETE FROM transcript_segments WHERE meeting_id = ?').run(id);
+      this.db.prepare('DELETE FROM meeting_summaries WHERE meeting_id = ?').run(id); // 의견·결론 정리도 함께(FR-010b)
       this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
     });
     scrub(this.db);
@@ -238,6 +240,7 @@ export class MeetingStore {
     this.deleteAudio(id);
     this.#inTx(() => {
       this.db.prepare('DELETE FROM transcript_segments WHERE meeting_id = ?').run(id);
+      this.db.prepare('DELETE FROM meeting_summaries WHERE meeting_id = ?').run(id); // 의견·결론 정리도 함께(FR-010b)
       this.db.prepare('DELETE FROM meetings WHERE id = ?').run(id);
     });
     scrub(this.db);

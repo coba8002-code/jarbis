@@ -11,6 +11,7 @@ import { QuickActions, defaultQuickActions, searchQuickActions } from '../quick/
 import { MemoryStore } from '../memory/memory.js';
 import { MeetingStore } from '../meeting/meetings.js';
 import { LiveMeetings } from '../meeting/live.js';
+import { MeetingSummaries } from '../meeting/summary.js';
 import { CharacterStore } from '../character/characters.js';
 import { AvatarImages } from '../character/avatar-images.js';
 import { ProviderRegistry } from '../providers/registry.js';
@@ -24,6 +25,10 @@ import { createAmbientService, localJudgeProvider } from '../voice/ambient-servi
 import { Briefings } from '../briefing/briefing.js';
 import { MemorySuggester } from '../memory/suggest.js';
 import { KSkills } from '../skills/kskill.js';
+import { GoogleLink } from '../integrations/google.js';
+import { Board } from '../board/board.js';
+import { Shortcuts } from '../shortcuts/shortcuts.js';
+import { createPcRunner } from '../shortcuts/pc-runner.js';
 import { acquireDataLock } from './data-lock.js';
 
 const VOICE_KEY = 'voice.enabled';
@@ -71,7 +76,8 @@ function systemSpeakerFactory() {
 // stt(SpeechToText 또는 { launcher, ffmpeg } 설정). 없으면 받아쓰기는 "설정 안 됨"으로 알린다.
 // meetingStt: 회의 파일용 받아쓰기(같은 형식). 없으면 stt를 쓴다.
 // kskillFetch: k-skill 조회 서버 호출(검사에서 가짜로 바꿈).
-export function createServices({ dataDir, env = process.env, providers, speaker, speakerFactory, stt, meetingStt, recover = true, kskillFetch = globalThis.fetch }) {
+// googleFetch·googleUrls: 구글 캘린더·Tasks 호출(검사에서 가짜 서버로 바꿈). pcRunner·shortcutPathCheck: 단축키 판의 PC 조작(검사에서 가짜).
+export function createServices({ dataDir, env = process.env, providers, speaker, speakerFactory, stt, meetingStt, recover = true, kskillFetch = globalThis.fetch, googleFetch = globalThis.fetch, googleUrls, pcRunner, shortcutPathCheck }) {
   mkdirSync(dataDir, { recursive: true });
   // 같은 데이터 폴더를 쓰는 다른 JARVIS가 있으면 DB를 열거나 복원하기 전에 멈춘다(src/app/data-lock.js).
   const lock = acquireDataLock(dataDir);
@@ -190,7 +196,7 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
       services.stt.close();
       if (services.meetingStt !== services.stt) services.meetingStt.close();
     },
-    close: () => { services.briefings?.stop(); services.memorySuggest?.stop(); turns.cancel(); services.stt.close(); if (services.meetingStt !== services.stt) services.meetingStt.close(); db.close(); lock.release(); },
+    close: () => { services.google?.close(); services.briefings?.stop(); services.memorySuggest?.stop(); turns.cancel(); services.stt.close(); if (services.meetingStt !== services.stt) services.meetingStt.close(); db.close(); lock.release(); },
   };
   // 회의 파일 받아쓰기(VAD 없는 엔진). 따로 주지 않으면 일반 받아쓰기를 같이 쓴다.
   services.meetingStt = meetingStt ? (meetingStt instanceof SpeechToText ? meetingStt : new SpeechToText(meetingStt)) : services.stt;
@@ -204,8 +210,16 @@ export function createServices({ dataDir, env = process.env, providers, speaker,
   // k-skill 조회 스킬(vendor/k-skill): 스킬마다 한 번 동의해야 쓴다. 대화(이 기기 안 공급자)와 아침 브리핑 날씨에 쓴다.
   services.kskills = new KSkills({ settings, providers: registry, localProvider: () => localJudgeProvider(registry), policy: modelPolicy, env, fetchImpl: kskillFetch });
   services.chat.skills = services.kskills;
-  // 아침 브리핑: 이 기기 안 자료로 이 기기 안 모델이 미리 쓴다(시작은 main.js에서 start()).
-  services.briefings = new Briefings({ db, settings, missions, meetings: services.meetings, providers: registry, characters, localProvider: () => localJudgeProvider(registry), policy: modelPolicy, weather: () => services.kskills.briefingWeather() });
+  // 구글 캘린더·Tasks(2026-11-15): 사용자가 직접 로그인해야 쓴다. 열쇠는 데이터 폴더에만.
+  services.google = new GoogleLink({ dataDir, env, fetchImpl: googleFetch, ...(googleUrls ? { urls: googleUrls } : {}) });
+  // 대기화면 자료(2026-11-15): 날씨(k-skill)·오늘 중요한 일·해야 할 일(구글, 나중에 ax.designjux.com)
+  services.board = new Board({ settings, kskills: services.kskills, google: services.google });
+  // 단축키 판(2026-11-15): 메인 화면 버튼. PC 조작은 이 PC 화면에서만 만들 수 있다.
+  services.shortcuts = new Shortcuts({ settings, runner: pcRunner ?? createPcRunner(), ...(shortcutPathCheck ? { pathCheck: shortcutPathCheck } : {}) });
+  // 아침 브리핑: 이 기기 안 자료로 이 기기 안 모델이 미리 쓴다(시작은 main.js에서 start()). 구글이 연결돼 있으면 오늘 일정·할 일도 넣는다.
+  services.briefings = new Briefings({ db, settings, missions, meetings: services.meetings, providers: registry, characters, localProvider: () => localJudgeProvider(registry), policy: modelPolicy, weather: () => services.kskills.briefingWeather(), agenda: () => services.google.briefingAgenda() });
+  // 회의 의견·결론 정리(2026-11-15): 녹취를 이 기기 안 모델에만 보내 정리한다(클라우드로 보내지 않음).
+  services.meetingSummaries = new MeetingSummaries({ db, meetings: services.meetings, providers: registry, localProvider: () => localJudgeProvider(registry), policy: modelPolicy });
   // 회의 마이크 녹음(T123): 조각을 원음 뒤에 붙이고 회의용 엔진으로 받아 적는다.
   services.liveMeetings = new LiveMeetings(services.meetings, services.meetingStt);
   // 앱 시작 때 한 번: 실행·녹음 도중 꺼진 것을 중단으로 표시한다(자동 재실행 없음).

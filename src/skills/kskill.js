@@ -214,7 +214,8 @@ export class KSkills {
   }
 
   // 정해진 서버에 GET 한 번. 리다이렉트는 따라가지 않고, 크기·시간을 제한한다.
-  async call(skill, plan) {
+  // full: 대기화면 날씨처럼 결과 전체(JSON)를 읽어야 할 때(기본은 AI에 넣기 좋게 6000자로 자름)
+  async call(skill, plan, { full = false } = {}) {
     const { path, query } = validatePlan(skill, plan);
     const url = new URL(`${this.base()}${path}`);
     for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
@@ -227,7 +228,7 @@ export class KSkills {
       if (buf.length > MAX_BYTES) throw new AppError('skill_failed', '조회 결과가 너무 큼');
       const text = buf.toString('utf8');
       if (!res.ok) throw new AppError('skill_failed', `조회 실패: HTTP ${res.status}`);
-      return { path, query, text: text.slice(0, 6000) };
+      return { path, query, text: full ? text : text.slice(0, 6000) };
     } catch (e) {
       if (e instanceof AppError) throw e;
       throw new AppError('skill_failed', e.name === 'AbortError' ? '조회 서버가 제때 답하지 않음' : `조회 서버 연결 실패: ${e.cause?.code ?? e.message}`);

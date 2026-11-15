@@ -24,6 +24,16 @@ const STATIC_FILES = {
   '/static/avatar.js': fileURLToPath(new URL('./public/avatar.js', import.meta.url)),
   '/static/presence.js': fileURLToPath(new URL('./public/presence.js', import.meta.url)),
   '/static/faces.js': fileURLToPath(new URL('./public/faces.js', import.meta.url)),
+  // 단축키 판·일정 바로 보기(메인 화면) · 설정 화면의 단축키·구글 탭 · 함께 쓰는 아이콘
+  '/static/deck.js': fileURLToPath(new URL('./public/deck.js', import.meta.url)),
+  '/static/deck-settings.js': fileURLToPath(new URL('./public/deck-settings.js', import.meta.url)),
+  '/static/deck-icons.js': fileURLToPath(new URL('./public/deck-icons.js', import.meta.url)),
+  // 캐릭터 모션(docs/CHARACTER_MOTION.md)
+  '/static/motion.js': fileURLToPath(new URL('./public/motion.js', import.meta.url)),
+  // 메인 화면 회의 녹음(캐릭터 아래 회의 버튼)
+  '/static/meeting-rec.js': fileURLToPath(new URL('./public/meeting-rec.js', import.meta.url)),
+  // 대기화면 보드(조는 캐릭터·날씨·오늘 중요한 일·해야 할 일)
+  '/static/idle-board.js': fileURLToPath(new URL('./public/idle-board.js', import.meta.url)),
 };
 // 얼굴 알아보기(2026-11-14 사용자 승인으로 내려받음): face-api 1.7.15(MIT, jsdelivr 해시 확인). 화면 브라우저 안에서만 쓴다.
 // 이름에 판(버전)이 들어 있어 바뀌지 않으므로 기기에 일주일 저장해 매번 6MB를 다시 받지 않게 한다.
@@ -61,6 +71,12 @@ const STATUS = {
   stt_unavailable: 503,
   tts_unavailable: 503,
   tts_failed: 502,
+  google_not_connected: 409,
+  google_denied: 409,
+  google_failed: 502,
+  shortcut_failed: 502,
+  pc_local_only: 403,
+  summary_failed: 502,
 };
 const MAX_AUDIO = 25 * 1024 * 1024;
 const MAX_MEETING_AUDIO = 200 * 1024 * 1024; // 회의 음성 파일 최대 200MB
@@ -138,6 +154,11 @@ function toId(v) {
   return id;
 }
 
+// 이 PC에서 연 화면인지(주소가 127.0.0.1·localhost). USB(adb reverse)로 붙은 기기도 여기에 든다(선으로 묶인 기기).
+// 와이파이·Tailscale 주소로 연 화면은 아니다. PC 조작 버튼 만들기·구글 연결은 이 PC 화면에서만 한다.
+const isLocalHost = (req) => /^(127\.0\.0\.1|localhost):\d+$/.test(String(req.headers.host ?? ''));
+const needConfirm = (b) => { if (b.confirm !== true) throw new AppError('invalid_input', '구글에 쓰기 전에 화면에서 확인해야 해요(confirm: true)'); };
+
 function sameToken(a, b) {
   if (typeof a !== 'string' || a.length !== b.length) return false;
   return timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -179,6 +200,8 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['POST', /^\/api\/memory-suggestions\/(\d+)\/accept$/, ([, id], q, b) => services.memorySuggest.accept(toId(id), b.content)],
     ['DELETE', /^\/api\/memory-suggestions\/(\d+)$/, ([, id]) => services.memorySuggest.dismiss(toId(id))],
     ['GET', /^\/api\/providers$/, () => services.providers.names().map((n) => services.providers.describe(n))],
+    // 메인 화면 AI 고르기: Ollama에 받아 둔 모델(라마 등) 목록. 이 기기 안 Ollama만 묻는다.
+    ['GET', /^\/api\/providers\/ollama\/models$/, async () => (await services.providers.providers.ollama?.models?.()) ?? []],
     // signal: 화면이 답을 받기 전에 연결을 끊으면(새로 고침·닫기) 생성을 끊는다(2026-11-14 실제 실행 QA).
     ['POST', /^\/api\/chat$/, (m, q, b, signal) => services.chat.ask({
       provider: b.provider,
@@ -246,11 +269,36 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
       const added = r.mascot ? applyMascot(services.avatarImages, r.character.id, IMAGE_STATES, r.key) : 0;
       return { ...r, imagesAdded: added, images: services.avatarImages.list(r.character.id) };
     }],
+    // 구글 캘린더·Tasks: 상태 · 연결 시작(이 PC 화면에서만) · 그만두기 · 끊기 · 일정/할 일 보기 · 추가 · 완료(쓰기는 confirm: true 필요)
+    ['GET', /^\/api\/google$/, () => services.google.status()],
+    ['POST', /^\/api\/google\/connect$/, (m, q, b, s, req) => {
+      if (!isLocalHost(req)) throw new AppError('pc_local_only', '구글 연결은 JARVIS를 켠 PC 화면에서 해 주세요');
+      return services.google.connect();
+    }],
+    ['POST', /^\/api\/google\/cancel$/, () => ({ cancelled: services.google.cancelConnect(), ...services.google.status() })],
+    ['DELETE', /^\/api\/google$/, () => services.google.disconnect()],
+    ['GET', /^\/api\/google\/events$/, (m, q) => services.google.events({ days: q.get('days') ? Number(q.get('days')) : 7 })],
+    ['POST', /^\/api\/google\/events$/, (m, q, b) => { needConfirm(b); return services.google.addEvent({ title: b.title, date: b.date, start: b.start || undefined, end: b.end || undefined }); }],
+    ['GET', /^\/api\/google\/tasks$/, () => services.google.tasks()],
+    ['POST', /^\/api\/google\/tasks$/, (m, q, b) => { needConfirm(b); return services.google.addTask({ title: b.title, due: b.due || undefined }); }],
+    ['POST', /^\/api\/google\/tasks\/([A-Za-z0-9_-]{1,200})\/complete$/, ([, id], q, b) => { needConfirm(b); return services.google.completeTask(id); }],
+    // 대기화면(쉬는 화면): 날씨·오늘 중요한 일·해야 할 일 한 번에 · 할 일 가져오는 곳 설정
+    ['GET', /^\/api\/board$/, () => services.board.view()],
+    ['GET', /^\/api\/board\/settings$/, () => services.board.settingsView()],
+    ['PUT', /^\/api\/board\/settings$/, (m, q, b) => services.board.setTodoSource(b.todoSource)],
+    // 단축키 판: 목록 · 통째로 저장(PC 조작 버튼은 이 PC 화면에서만 새로 만들거나 바꿈) · 기본으로 되돌리기 · 누르기
+    ['GET', /^\/api\/shortcuts$/, (m, q, b, s, req) => ({ ...services.shortcuts.list(), local: isLocalHost(req) })],
+    ['PUT', /^\/api\/shortcuts$/, (m, q, b, s, req) => ({ ...services.shortcuts.save(b.buttons, { local: isLocalHost(req) }), local: isLocalHost(req) })],
+    ['POST', /^\/api\/shortcuts\/reset$/, (m, q, b, s, req) => ({ ...services.shortcuts.reset(), local: isLocalHost(req) })],
+    ['POST', /^\/api\/shortcuts\/([a-z0-9-]{1,24})\/press$/, ([, id]) => services.shortcuts.press(id)],
     ['GET', /^\/api\/meetings$/, () => services.meetings.list()],
     // 회의록 검색(FR-008a): ?q= 제목·녹취 글. 이 기기 안에서만 찾는다.
     ['GET', /^\/api\/meetings\/search$/, (m, q) => services.meetings.search(q.get('q') ?? '')],
     ['GET', /^\/api\/meetings\/(\d+)\/segments$/, ([, id]) => services.meetings.segments(toId(id))],
     ['DELETE', /^\/api\/meetings\/(\d+)$/, ([, id]) => services.meetings.delete(toId(id))],
+    // 회의 의견·결론 정리(이 기기 안 모델만): 보기(없으면 summary: null) · 만들기(같은 회의 동시 요청은 하나로, 화면이 끊으면 멈춤)
+    ['GET', /^\/api\/meetings\/(\d+)\/summary$/, ([, id]) => services.meetingSummaries.status(toId(id))],
+    ['POST', /^\/api\/meetings\/(\d+)\/summary$/, ([, id], q, b, signal) => services.meetingSummaries.generate(toId(id), { signal }).then((summary) => ({ summary, generating: false }))],
     // 회의 마이크 녹음(T123): 시작 · 멈춤. 조각은 아래 /chunk(본문은 WAV 그대로).
     ['POST', /^\/api\/meetings\/live$/, (m, q, b) => services.liveMeetings.start(typeof b.title === 'string' && b.title.trim() ? b.title : `회의 ${new Date().toLocaleString('ko-KR')}`)],
     ['POST', /^\/api\/meetings\/(\d+)\/stop$/, ([, id]) => services.liveMeetings.stop(toId(id))],
@@ -398,7 +446,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
         const body = method === 'GET' || method === 'DELETE' ? {} : await readJson(req);
         const gone = new AbortController();
         res.on('close', () => { if (!res.writableEnded) gone.abort(); });
-        return send(res, 200, await fn(m, url.searchParams, body, gone.signal));
+        return send(res, 200, await fn(m, url.searchParams, body, gone.signal, req));
       }
       return send(res, 404, { error: { code: 'not_found', message: '없는 주소' } });
     } catch (e) {

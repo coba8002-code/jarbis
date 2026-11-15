@@ -80,6 +80,11 @@
   .char-hero { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0 -16px 16px; padding: 16px; background: var(--panel-2); }
   @supports (color: color-mix(in srgb, red 50%, white)) { .char-hero { background: linear-gradient(180deg, color-mix(in srgb, var(--c) 24%, var(--panel)), color-mix(in srgb, var(--c) 8%, var(--panel))); } }
   .char-name { font-size: 18px; font-weight: 600; }
+  /* 회의 의견·결론 정리 */
+  .meet-sum { margin: 12px 0; padding: 12px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--panel-2); }
+  .sum-list { margin: 0; padding-left: 20px; }
+  .sum-list li { margin: 4px 0; }
+  .sum-list li button.act { min-height: 32px; padding: 0 8px; margin-right: 8px; font-variant-numeric: tabular-nums; }
   @media (max-width: 520px) { header { padding: 8px 16px; } header small { display: none; } nav { padding: 8px 16px; } }
   @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
@@ -94,6 +99,7 @@
   <button role="tab" data-tab="meetings" aria-selected="false">회의</button>
   <button role="tab" data-tab="characters" aria-selected="false">캐릭터</button>
   <button role="tab" data-tab="skills" aria-selected="false">스킬</button>
+  <button role="tab" data-tab="shortcuts" aria-selected="false">단축키·구글</button>
 </nav>
 <main>
   <section id="tab-missions" role="tabpanel">
@@ -219,6 +225,11 @@
       <div class="row" style="margin-top:8px"><button class="act primary" id="home-save">위치 저장</button><button class="act" id="home-clear">위치 지우기</button></div>
     </div>
     <div id="skills"></div>
+  </section>
+  <section id="tab-shortcuts" role="tabpanel" hidden>
+    <h2>단축키·구글</h2>
+    <p class="lead">메인 화면의 단축키 버튼을 고치고, 구글 캘린더·Tasks를 연결하고, 대기화면에 보일 할 일을 골라요.</p>
+    <div id="deck-settings"></div>
   </section>
 </main>
 <div id="toast" role="status" aria-live="polite"></div>
@@ -518,12 +529,46 @@ async function loadMemories() {
   render(box, isLatest, items);
 }
 
+// 회의 의견·결론 정리(2026-11-15): 이 PC 안 AI만 녹취를 읽고 의견·결정·할 일·남은 질문으로 정리한다(클라우드로 보내지 않음).
+// 의견의 시간을 누르면 그 위치부터 원음을 듣는다. 받아쓰기가 말한 사람을 구분하지 못해 사람 이름은 녹취에 나올 때만 보인다.
+const summaryBusy = new Set();
+function summaryView(m, sum, hasSegs) {
+  const fmtAt = (at) => { const [mm, ss] = at.split(':').map(Number); return (mm * 60 + ss) * 1000; };
+  const box = el('div', { class: 'meet-sum', 'data-summary': m.id });
+  const busy = summaryBusy.has(m.id) || sum?.generating;
+  const canRun = m.status !== 'recording' && hasSegs;
+  const run = el('button', { class: `act${sum?.summary ? '' : ' primary'}`, type: 'button', disabled: !canRun || busy ? '' : undefined, onclick: () => guard(async () => {
+    summaryBusy.add(m.id);
+    run.disabled = true; run.textContent = '정리하는 중…';
+    note.textContent = '이 PC 안 AI가 녹취를 읽고 있어요. 긴 회의는 몇 분 걸릴 수 있어요.';
+    try { await api('POST', `/api/meetings/${m.id}/summary`); toast('의견·결론을 정리했어요'); }
+    finally { summaryBusy.delete(m.id); loadMeetings(); }
+  }) }, busy ? '정리하는 중…' : sum?.summary ? '다시 정리' : '의견·결론 정리');
+  const note = el('p', { class: 'muted' }, !hasSegs ? '받아 적은 내용이 생기면 정리할 수 있어요.' : m.status === 'recording' ? '녹음을 끝낸 뒤에 정리할 수 있어요.' : busy ? '이 PC 안 AI가 녹취를 읽고 있어요.' : '');
+  box.append(el('div', { class: 'row', style: 'justify-content:space-between' }, el('strong', {}, '의견·결론'), run));
+  const s = sum?.summary;
+  if (s) {
+    if (s.summary) box.append(el('p', { style: 'margin:8px 0' }, s.summary));
+    const section = (title, items) => (items.length ? [el('p', { class: 'muted', style: 'margin:12px 0 4px' }, title), el('ul', { class: 'sum-list' }, ...items)] : []);
+    box.append(
+      ...section('나온 의견', s.opinions.map((o) => el('li', {}, o.at ? el('button', { class: 'act', type: 'button', 'aria-label': `${o.at}부터 듣기`, onclick: () => guard(() => playMeeting(m, fmtAt(o.at))) }, o.at) : '', el('span', {}, o.point)))),
+      ...section('정한 것', s.decisions.map((d) => el('li', {}, d))),
+      ...section('할 일', s.todos.map((t) => el('li', {}, t.task, t.who ? el('span', { class: 'muted' }, ` · ${t.who}`) : ''))),
+      ...section('남은 질문', s.open.map((q) => el('li', {}, q))),
+    );
+    if (!s.opinions.length && !s.decisions.length && !s.todos.length && !s.open.length) box.append(el('p', { class: 'muted' }, '뚜렷한 의견·결정을 찾지 못했어요.'));
+    box.append(el('p', { class: 'muted', style: 'margin-top:8px' }, `이 PC 안 AI${s.model ? `(${s.model})` : ''}가 녹취만 보고 정리했어요 · 말한 사람은 구분하지 않아요${s.truncated ? ' · 녹취가 길어 뒷부분은 빠졌어요' : ''}`));
+  }
+  box.append(note);
+  return box;
+}
 async function loadMeetings() {
   const isLatest = ticket('meetings'); const box = $('#meetings'); const items = [];
   const list = await api('GET', '/api/meetings');
   if (!list.length) { render(box, isLatest, [emptyState('저장된 회의가 없어요', '회의를 녹음하거나 음성 파일을 넣으면 시간별 회의록이 여기에 생겨요.', '회의 이름 적고 시작하기', () => $('#meet-title').focus())]); return; }
   for (const m of list) {
     const segs = await api('GET', `/api/meetings/${m.id}/segments`);
+    const sum = await api('GET', `/api/meetings/${m.id}/summary`).catch(() => null);
     const fmt = (ms) => `${String(Math.floor(ms / 60000)).padStart(2, '0')}:${String(Math.floor(ms / 1000) % 60).padStart(2, '0')}`;
     // 시간을 누르면 그 구간부터 원음을 재생한다
     const lines = segs.length
@@ -532,6 +577,7 @@ async function loadMeetings() {
         el('span', {}, s.text)))
       : [el('p', { class: 'muted' }, '녹취 없음')];
     items.push(el('div', { class: 'card', 'data-meeting': m.id }, el('strong', {}, `${m.title}`), el('span', { class: 'muted' }, ` · ${STATUS[m.status] ?? m.status}${m.duration_ms ? ` · ${fmt(m.duration_ms)}` : ''}`),
+      summaryView(m, sum, segs.length > 0),
       el('div', {}, ...lines),
       m.status !== 'recording' ? el('button', { class: 'act danger', onclick: () => guard(async () => {
         if (!(await askConfirm({ title: '회의를 지울까요?', body: `"${m.title}" 회의의 원음과 녹취를 모두 지워요. 지우면 되돌릴 수 없어요.`, ok: '회의 지우기' }))) return;
@@ -952,7 +998,8 @@ $('#home-clear').addEventListener('click', () => guard(async () => {
   toast('기본 위치 지움');
 }));
 
-const loaders = { missions: loadMissions, quick: loadQuick, chat: loadChat, memory: loadMemories, meetings: loadMeetings, characters: loadCharacters, skills: loadSkills };
+// shortcuts: 단축키·구글 탭(deck-settings.js가 불러옴. 파일이 늦게 오면 그 파일이 직접 불러옴)
+const loaders = { missions: loadMissions, quick: loadQuick, chat: loadChat, memory: loadMemories, meetings: loadMeetings, characters: loadCharacters, skills: loadSkills, shortcuts: () => window.deckSettings?.load() };
 function show(tab) {
   if (!loaders[tab]) tab = 'missions';
   // 주소 끝(#meetings 등)에 지금 탭을 적어 두어 자비스 모드의 요약 타일·새로 고침에서도 같은 탭이 열린다
@@ -1176,5 +1223,6 @@ guard(async () => {
 window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 show(location.hash.slice(1));
 </script>
+<script type="module" src="/static/deck-settings.js"></script>
 </body>
 </html>
