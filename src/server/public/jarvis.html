@@ -891,6 +891,7 @@ async function micStop() {
   const ms = mic.cap.recordedMs;
   const wav = mic.cap.stop();
   micReset();
+  if (!mic.heard && mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 이 기기 내장 마이크는 지금 쓸 수 없어요. USB 마이크를 꽂고 다시 눌러 주세요.'); return; }
   if (!mic.heard || ms < 300) { status('말소리를 듣지 못했어요. 마이크 가까이에서 다시 말해 주세요.'); return; }
   status('받아 적는 중이에요…');
   try {
@@ -929,6 +930,7 @@ async function micStart() {
   mic.cap.start({ preRoll: false });
   mic.seg = V.createSegmenter();
   mic.heard = false;
+  mic.silentHw = true; // 한 번이라도 0이 아닌 샘플이 오면 false(내장 마이크 배선·믹서 꺼짐 구분)
   mic.startedAt = performance.now();
   const buf = new Float32Array(analyser.fftSize);
   face.recording = true;
@@ -938,6 +940,7 @@ async function micStart() {
   status('듣고 있어요. 말을 마치면 자동으로 멈춰요.');
   mic.timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
+    if (mic.silentHw && buf.some((x) => x !== 0)) mic.silentHw = false;
     const ev = mic.seg.push(V.rmsOf(buf), performance.now());
     if (ev === 'start') mic.heard = true;
     else if (ev === 'end' && mic.heard) micStop();
@@ -1162,13 +1165,14 @@ async function buildChecks() {
       catch (err) { set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 마이크를 허용해 주세요.' : err.name === 'NotFoundError' ? '마이크가 없어요.' : err.message); e.target.disabled = false; return; }
       const ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(an);
-      const buf = new Float32Array(an.fftSize); let peak = 0; const t0 = performance.now();
+      const buf = new Float32Array(an.fftSize); let peak = 0; let any = false; const t0 = performance.now();
       const label = stream.getAudioTracks()[0]?.label || '이름 없음';
       const tick = setInterval(() => {
-        an.getFloatTimeDomainData(buf); const r = V.rmsOf(buf); peak = Math.max(peak, r);
+        an.getFloatTimeDomainData(buf); const r = V.rmsOf(buf); peak = Math.max(peak, r); if (!any && buf.some((x) => x !== 0)) any = true;
         meter.firstChild.style.width = `${Math.min(100, Math.round(r * 400))}%`;
         if (performance.now() - t0 > 3000) {
           clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); ctx.close(); meter.firstChild.style.width = '0';
+          if (!any) { set('mic', 'bad', `열렸지만 신호가 전혀 없어요(소리 크기 0, ${label}). 내장 마이크가 연결돼 있지 않거나 꺼져 있어요. USB 마이크를 꽂아 주세요.`); e.target.disabled = false; return; }
           set('mic', peak > 0.02 ? 'ok' : 'warn', peak > 0.02 ? `소리 들림 (${label}, 최대 ${peak.toFixed(3)})` : `열렸지만 소리가 거의 없어요 (${label}, 최대 ${peak.toFixed(3)}). 말하면서 다시 시험해 보세요.`);
           e.target.disabled = false;
         }

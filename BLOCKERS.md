@@ -190,3 +190,9 @@ Windows의 실제 글 대화(Ollama), 기억 반영, 캐릭터 편집·적용·�
 - 옆 PC가 꺼지거나 USB가 빠지면 앱은 "연결하지 못했어요"를 보이고 15초마다 다시 붙는다.
 - 앱은 디버그 서명(android/out/debug.keystore, GitHub 제외). 이 열쇠를 잃으면 앱을 지우고 다시 깔아야 한다(설정 다시 입력).
 - 시스템 odex 일부가 깨져 있어 다른 앱이 꺼질 수 있다(설정 앱은 `cmd package compile -m speed -f`로 고침).
+
+## 토스 프론트 내장 마이크: 소리 크기 0 (2026-11-15 11:08 KST 확인)
+- 앱 0.2.2 MicProbe(adb 전용)로 녹음 소스 0/1/5/6/7/9 × 44.1k 스테레오, 48k·16k 모노 9가지를 재 보니 전부 RMS 0, 피크 0, 0인 샘플 100% (잡음조차 없음 = 디지털 무음).
+- 원인: 오디오 HAL(AudioHardwareTiny/alsa_route)이 내장 마이크를 sound card 0으로 보낸다. 그런데 card0 = hdmi-sound(재생 전용), 실제 코덱 es8316(마이크·ADC)은 card1. 로그: "route_info->sound_card 0", "Can not get ctl : ADC Capture Volume".
+- 루트·벤더 파티션 수정 없이는 못 고친다(파티션 쓰기 금지). 해결: USB 마이크(OTG). 안드로이드는 USB 입력이 꽂히면 내장 마이크보다 먼저 쓴다.
+- 화면: 신호가 0이면 "USB 마이크를 꽂아 주세요"라고 알려 준다. 서버: JARVIS_AUDIO_DIAG=1이면 받은 음성의 길이·RMS·피크를 로그에 한 줄 남긴다(음성은 저장 안 함).

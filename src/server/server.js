@@ -1,6 +1,7 @@
 // 로컬 화면 서버. 외부 패키지 없음. Windows·macOS 공통.
 // 보안: 127.0.0.1에만 열고, Host 머리글이 이 기기 주소가 아니면 거부(DNS 리바인딩 방지),
 // 모든 /api 요청은 실행마다 새로 만드는 토큰이 있어야 한다(다른 사이트의 요청 방지).
+import { logAudioDiag } from './audio-diag.js';
 import { createServer } from 'node:http';
 import { createServer as createHttpsServer } from 'node:https';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -298,7 +299,9 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
           throw new AppError('invalid_input', '음성 파일(audio/*)만 받을 수 있음');
         }
         // filter: 조용할 때 지어낸 말("시청해 주셔서 감사합니다." 등)을 뺀다(transcript-filter.js).
-        const r = await services.stt.transcribe(await readRaw(req, MAX_AUDIO), { filter: true });
+        const sttAudio = await readRaw(req, MAX_AUDIO);
+        logAudioDiag('/api/stt', sttAudio); // JARVIS_AUDIO_DIAG=1 일 때만 소리 크기 한 줄
+        const r = await services.stt.transcribe(sttAudio, { filter: true });
         // ?echo=check: 듣기 모드에서 받아 적은 글이 JARVIS가 방금 읽은 글(스피커 소리)인지 함께 알려 준다(T219).
         if (url.searchParams.get('echo') === 'check') {
           const e = checkEcho(r.text, services.voice.recentSpoken());
@@ -315,6 +318,7 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
           throw new AppError('invalid_input', '음성 파일(audio/*)만 받을 수 있음');
         }
         const audio = await readRaw(req, MAX_AUDIO);
+        logAudioDiag('/api/ambient/hear', audio);
         return send(res, 200, await services.ambient.hear(audio, {
           utterMs: Math.min(60_000, Number(req.headers['x-jarvis-utter-ms']) || 0),
           agoMs: Math.min(60_000, Number(req.headers['x-jarvis-ago-ms']) || 0),
