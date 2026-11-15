@@ -735,7 +735,7 @@ let voiceOn = store.get('jarvis.deviceVoice') !== 'off';
 let speechUnlocked = false;
 function showVoiceButton() {
   const b = $('#voice');
-  b.hidden = !synth && !app;
+  b.hidden = false; // 기기 음성이 없어도 PC 음성으로 대신 읽으므로 스피커 버튼은 늘 보인다(위쪽 막대: 스피커 · 설정)
   const label = voiceOn ? '소리 끄기' : '소리 켜기';
   b.setAttribute('aria-label', label);
   b.setAttribute('aria-pressed', String(voiceOn));

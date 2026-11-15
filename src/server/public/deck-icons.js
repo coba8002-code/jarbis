@@ -45,7 +45,12 @@ export const COLOR_VALUES = {
 export const ACTION_NAMES = {
   ask: '자비스에게 물어보기', open: '화면 열기', voice: '소리 켜고 끄기', stop: '멈추기', briefing: '브리핑 듣기',
   'pc-app': 'PC 프로그램 열기', 'pc-keys': 'PC 단축키 보내기', 'pc-url': 'PC에서 웹 주소 열기',
+  'pc-text': 'PC에 글자 입력', multi: '여러 동작 한 번에(PC)', widget: '실시간 버튼(시계·PC 상태)',
 };
+export const WIDGET_NAMES = { clock: '시계', 'pc-stats': 'PC 상태(CPU·메모리)' };
+// 여러 동작에 넣을 수 있는 칸
+export const STEP_NAMES = { 'pc-keys': 'PC 단축키 보내기', 'pc-app': 'PC 프로그램 열기', 'pc-url': 'PC에서 웹 주소 열기', 'pc-text': 'PC에 글자 입력', wait: '기다리기' };
+export const isPcAction = (a) => Boolean(a && (String(a.type).startsWith('pc-') || a.type === 'multi'));
 export const VIEW_NAMES = { calendar: '일정', tasks: '할 일', briefing: '오늘 브리핑', check: '장치 점검', settings: '설정', pals: '친구 고르기' };
 
 export function iconSvg(name, size = 24) {

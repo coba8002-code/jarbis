@@ -15,12 +15,12 @@ import { tempDbPath } from './helpers.js';
 
 const fakeRunner = () => {
   const did = [];
-  return { supported: true, did, openApp: async (p, a) => { did.push(['app', p, a]); }, sendKeys: async (k) => { did.push(['keys', k]); }, openUrl: async (u) => { did.push(['url', u]); } };
+  return { supported: true, did, openApp: async (p, a) => { did.push(['app', p, a]); }, sendKeys: async (k) => { did.push(['keys', k]); }, openUrl: async (u) => { did.push(['url', u]); }, typeText: async (x) => { did.push(['text', x]); } };
 };
 const anyPath = (p) => p; // 검사용: 경로 있는지 보지 않음
 const store = (runner = fakeRunner()) => {
   const db = openDb(tempDbPath());
-  return { s: new Shortcuts({ settings: new Settings(db), runner, pathCheck: anyPath }), runner, db };
+  return { s: new Shortcuts({ settings: new Settings(db), runner, pathCheck: anyPath, sleep: async (ms) => { runner.did?.push(['wait', ms]); } }), runner, db };
 };
 
 test('처음에는 기본 버튼(화면 안 일만)을 보여 준다', (t) => {
@@ -121,7 +121,7 @@ test('누르기: 화면 안 일은 할 일만 돌려주고, PC 조작은 실행�
     { id: 'mute', label: '음소거', icon: 'mute', color: 'gray', action: { type: 'pc-keys', keys: 'Mute' } },
     { id: 'note', label: '메모장', icon: 'app', color: 'blue', action: { type: 'pc-app', path: 'C:\\Windows\\notepad.exe' } },
   ], { local: true });
-  assert.deepEqual(await s.press('ask'), { id: 'ask', client: true, action: { type: 'ask', text: '오늘 날씨 어때?' } });
+  assert.deepEqual(await s.press('ask'), { id: 'ask', client: true, hold: false, action: { type: 'ask', text: '오늘 날씨 어때?' } });
   assert.equal(runner.did.length, 0);
   await s.press('yt');
   await s.press('mute');

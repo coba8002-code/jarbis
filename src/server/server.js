@@ -34,6 +34,7 @@ const STATIC_FILES = {
   '/static/meeting-rec.js': fileURLToPath(new URL('./public/meeting-rec.js', import.meta.url)),
   // 대기화면 보드(조는 캐릭터·날씨·오늘 중요한 일·해야 할 일)
   '/static/idle-board.js': fileURLToPath(new URL('./public/idle-board.js', import.meta.url)),
+  '/static/top-menu.js': fileURLToPath(new URL('./public/top-menu.js', import.meta.url)),
 };
 // 얼굴 알아보기(2026-11-14 사용자 승인으로 내려받음): face-api 1.7.15(MIT, jsdelivr 해시 확인). 화면 브라우저 안에서만 쓴다.
 // 이름에 판(버전)이 들어 있어 바뀌지 않으므로 기기에 일주일 저장해 매번 6MB를 다시 받지 않게 한다.
@@ -288,9 +289,10 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['PUT', /^\/api\/board\/settings$/, (m, q, b) => services.board.setTodoSource(b.todoSource)],
     // 단축키 판: 목록 · 통째로 저장(PC 조작 버튼은 이 PC 화면에서만 새로 만들거나 바꿈) · 기본으로 되돌리기 · 누르기
     ['GET', /^\/api\/shortcuts$/, (m, q, b, s, req) => ({ ...services.shortcuts.list(), local: isLocalHost(req) })],
-    ['PUT', /^\/api\/shortcuts$/, (m, q, b, s, req) => ({ ...services.shortcuts.save(b.buttons, { local: isLocalHost(req) }), local: isLocalHost(req) })],
+    ['PUT', /^\/api\/shortcuts$/, (m, q, b, s, req) => ({ ...services.shortcuts.save(b.buttons, { local: isLocalHost(req), pages: b.pages }), local: isLocalHost(req) })],
     ['POST', /^\/api\/shortcuts\/reset$/, (m, q, b, s, req) => ({ ...services.shortcuts.reset(), local: isLocalHost(req) })],
-    ['POST', /^\/api\/shortcuts\/([a-z0-9-]{1,24})\/press$/, ([, id]) => services.shortcuts.press(id)],
+    ['GET', /^\/api\/shortcuts\/stats$/, () => services.shortcuts.stats()], // 실시간 버튼(PC 상태): CPU·메모리 %
+    ['POST', /^\/api\/shortcuts\/([a-z0-9-]{1,24})\/press$/, ([, id], q, b) => services.shortcuts.press(id, { hold: b?.hold === true })],
     ['GET', /^\/api\/meetings$/, () => services.meetings.list()],
     // 회의록 검색(FR-008a): ?q= 제목·녹취 글. 이 기기 안에서만 찾는다.
     ['GET', /^\/api\/meetings\/search$/, (m, q) => services.meetings.search(q.get('q') ?? '')],

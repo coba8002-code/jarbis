@@ -1,4 +1,4 @@
-// 단축키 판의 PC 조작: 프로그램 열기 · 단축키 보내기 · 웹 주소 열기. Windows·macOS.
+// 단축키 판의 PC 조작: 프로그램 열기 · 단축키 보내기 · 웹 주소 열기 · 글자 입력(클립보드에 넣고 붙여넣기). Windows·macOS.
 // 쉘을 거치지 않는다(spawn에 인자 목록으로 넘김). 단축키는 정해 둔 키 이름만 받아 숫자 코드로 바꿔 넘긴다.
 // 단축키는 지금 앞에 떠 있는 창으로 간다(스트림덱과 같은 방식).
 import { spawn as nodeSpawn } from 'node:child_process';
@@ -77,10 +77,11 @@ function launch(spawnImpl, cmd, args) {
   });
 }
 
-// 끝날 때까지 기다린다(키 보내기). 10초 넘으면 끊는다.
-function runToEnd(spawnImpl, cmd, args) {
+// 끝날 때까지 기다린다(키 보내기). 10초 넘으면 끊는다. env: 더할 환경 변수, input: 표준 입력으로 넘길 글
+function runToEnd(spawnImpl, cmd, args, { env = null, input = null } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawnImpl(cmd, args, { stdio: ['ignore', 'ignore', 'pipe'], windowsHide: true });
+    const child = spawnImpl(cmd, args, { stdio: [input === null ? 'ignore' : 'pipe', 'ignore', 'pipe'], windowsHide: true, ...(env ? { env: { ...process.env, ...env } } : {}) });
+    if (input !== null) { child.stdin?.on?.('error', () => {}); child.stdin?.end?.(input); }
     let err = '';
     child.stderr?.on('data', (c) => { err = (err + c).slice(-300); });
     const timer = setTimeout(() => child.kill(), 10_000);
@@ -113,6 +114,16 @@ export function createPcRunner({ platform = process.platform, spawnImpl = nodeSp
       if (win) return runToEnd(spawnImpl, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', windowsKeyScript(parsed)]);
       if (mac) return runToEnd(spawnImpl, 'osascript', ['-e', macKeyScript(parsed)]);
       throw new AppError('not_configured', '이 OS에서는 단축키 보내기를 지원하지 않아요');
+    },
+    // 글자 입력: 글을 클립보드에 넣고 ctrl+v(Mac cmd+v)로 붙인다. 글은 명령 줄에 넣지 않는다
+    // (Windows는 환경 변수로, Mac은 표준 입력으로 넘김). 원래 클립보드 내용은 바뀐다.
+    async typeText(text) {
+      if (win) return runToEnd(spawnImpl, 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `Set-Clipboard -Value $env:JARVIS_PASTE_TEXT; ${windowsKeyScript(parseKeys('ctrl+v'))}`], { env: { JARVIS_PASTE_TEXT: text } });
+      if (mac) {
+        await runToEnd(spawnImpl, 'pbcopy', [], { input: text });
+        return runToEnd(spawnImpl, 'osascript', ['-e', macKeyScript(parseKeys('cmd+v'))]);
+      }
+      throw new AppError('not_configured', '이 OS에서는 글자 입력을 지원하지 않아요');
     },
     async openUrl(url) {
       if (win) return launch(spawnImpl, 'rundll32.exe', ['url.dll,FileProtocolHandler', url]);

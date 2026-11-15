@@ -178,7 +178,7 @@ test('자비스 모드 화면: 토큰이 들어가고, 이 화면만 카메라 �
   assert.doesNotMatch(r.text, /https?:\/\//);
   assert.deepEqual([...r.text.matchAll(/from '([^']+)'/g)].map((m) => m[1]).sort(), ['/static/avatar.js', '/static/deck.js', '/static/faces.js', '/static/idle-board.js', '/static/motion.js', '/static/presence.js', '/static/voice-input.js']);
   // deck-icons.js: 단축키 판 아이콘(deck.js·deck-settings.js가 불러옴), deck-settings.js: 설정 화면의 단축키·구글 탭
-  for (const s of ['/static/avatar.js', '/static/faces.js', '/static/presence.js', '/static/voice-input.js', '/static/deck.js', '/static/deck-icons.js', '/static/deck-settings.js', '/static/motion.js', '/static/meeting-rec.js', '/static/idle-board.js']) {
+  for (const s of ['/static/avatar.js', '/static/faces.js', '/static/presence.js', '/static/voice-input.js', '/static/deck.js', '/static/deck-icons.js', '/static/deck-settings.js', '/static/motion.js', '/static/meeting-rec.js', '/static/idle-board.js', '/static/top-menu.js']) {
     const f = await call('GET', s, undefined, { token: null });
     assert.equal(f.status, 200, s);
     assert.doesNotMatch(f.text, /(from\s*|import\(\s*|fetch\(\s*)['"`]https?:/, `${s}: 외부 스크립트·요청 없음`);
