@@ -205,3 +205,10 @@ Windows의 실제 글 대화(Ollama), 기억 반영, 캐릭터 편집·적용·�
 - 권한 재발 방지: 재설치 시 install -g로 ONE_TIME 플래그 제거, PC 다리 스크립트가 5분마다 pm grant.
 - 재설치하면 연결 설정이 지워짐 → ConfigReceiver(adb 전용)로 주소·지문 복구: am broadcast -n com.jarvishybrid.app/.ConfigReceiver --es server https://127.0.0.1:4780 --es pin <지문>. 평소 업데이트는 같은 android/out/debug.keystore로 서명한 APK를 install -r(설정 유지). uninstall은 하지 말 것.
 - 점검 결과: 카메라 2개(ov5675b·ov5675, 2592x1944) 실제 프레임 정상(Y 평균 85/82). 단 커널 "Failed to enable afvdd_gpio"(자동초점 전원) 경고. 센서는 가짜 가속도계 1개뿐(/dev/mma8452_daemon 없음, 등록 실패) → 근접·조도 없음. 터치 ilitek_ts 정상, Wi-Fi 정상(RSSI -46), BT 켜짐, USB 호스트 기능 있음(꽂힌 장치 없음).
+
+## 토스 프론트 내장 마이크·스피커 켜짐 (2026-11-15 12:00 KST, 대표님 A안 승인)
+- adb root로 es8316(card1) 믹서를 직접 켰다. 파티션 쓰기 없음, 재부팅하면 사라지므로 PC 다리(scripts/tossfront-bridge.ps1)가 부팅 ID가 바뀔 때마다 adb root → tinymix → adb unroot로 다시 넣는다.
+- 값: Differential Mux='lin1-rin1 with 20db Boost', Digital Mic Mux='dmic disable', Mic Boost=On, ADC PGA Gain=10/10, ADC Capture Volume=192, ALC Capture=On, Left/Right Headphone Mixer DAC Switch=On, Headphone Playback Volume=2/3, Headphone Mixer Volume=6/11.
+- 원래 값: PGA 0, ALC Off, 헤드폰 믹서 DAC 스위치 Off(→ 스피커도 무음이었음).
+- 측정: 전 -66~-82 dBFS(거의 0, 440Hz 안 잡힘) → 후 조용할 때 -40~-45 dBFS, 스피커 440Hz 재생 구간 -26 dBFS(배경 대비 186~207배). 핵심은 ALC(자동 이득).
+- 남은 일: 사람 목소리로 받아쓰기 확인, 말소리 감지 기준(threshold 0.02) 조정 필요 여부, 스피커 볼륨 조정.

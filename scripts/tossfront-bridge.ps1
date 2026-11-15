@@ -13,12 +13,46 @@ $root = Split-Path -Parent $PSScriptRoot
 $logs = Join-Path $root 'logs'
 New-Item -ItemType Directory -Force $logs | Out-Null
 $target = if ($Serial) { @('-s', $Serial) } else { @() }
+# ---- 토스 프론트 내장 마이크·스피커 믹서(es8316, card1) 켜기 (2026-11-15) ----
+# 기기 오디오 HAL이 믹서 설정을 card0(HDMI)에만 걸어 es8316의 마이크·스피커 경로가 꺼진 채로 남는다.
+# 부팅할 때마다(부팅 ID가 바뀌면) 잠깐 adb root로 아래 값을 넣고 바로 adb unroot 한다. 파티션은 건드리지 않는다(재부팅하면 사라짐).
+$MixerCmds = @(
+  "tinymix -D 1 'Differential Mux' 'lin1-rin1 with 20db Boost'",
+  "tinymix -D 1 'Digital Mic Mux' 'dmic disable'",
+  "tinymix -D 1 'Mic Boost Switch' 1",
+  "tinymix -D 1 'ADC PGA Gain Volume' 10",
+  "tinymix -D 1 'ADC Capture Volume' 192",
+  "tinymix -D 1 'ALC Capture Switch' 1",
+  "tinymix -D 1 'Left Headphone Mixer Left DAC Switch' 1",
+  "tinymix -D 1 'Right Headphone Mixer Right DAC Switch' 1",
+  "tinymix -D 1 'Headphone Playback Volume' 2 2",
+  "tinymix -D 1 'Headphone Mixer Volume' 6 6"
+)
+function Set-TossMixer([string]$AdbExe, [string[]]$Target) {
+  & $AdbExe @Target root 2>$null | Out-Null
+  Start-Sleep -Seconds 3
+  & $AdbExe @Target wait-for-device 2>$null
+  $id = (& $AdbExe @Target shell id 2>$null) -join ''
+  if ($id -notlike 'uid=0*') { return $false }
+  & $AdbExe @Target shell ($MixerCmds -join '; ') 2>$null | Out-Null
+  $check = (& $AdbExe @Target shell "tinymix -D 1 'ALC Capture Switch'" 2>$null) -join ''
+  & $AdbExe @Target unroot 2>$null | Out-Null
+  Start-Sleep -Seconds 3
+  & $AdbExe @Target wait-for-device 2>$null
+  return ($check -match 'On')
+}
+$lastBoot = ''
 $loop = 0
 while ($true) {
   $running = Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -like '*src/main.js*' }
   if (-not $running) {
     Start-Process -FilePath node -ArgumentList 'src/main.js', '--https', '--port', "$Port" -WorkingDirectory $root `
       -RedirectStandardOutput (Join-Path $logs 'server.out.txt') -RedirectStandardError (Join-Path $logs 'server.err.txt') -WindowStyle Hidden
+  }
+  # 기기가 새로 부팅됐으면(부팅 ID가 바뀌면) 믹서를 다시 켠다. 실패하면 다음 바퀴에 다시 해 본다.
+  $boot = (& $Adb @target shell cat /proc/sys/kernel/random/boot_id 2>$null) -join ''
+  if ($boot -and $boot -ne $lastBoot) {
+    if (Set-TossMixer $Adb $target) { $lastBoot = $boot }
   }
   & $Adb @target reverse "tcp:$Port" "tcp:$Port" 2>$null | Out-Null
   # 5분마다 앱 마이크·카메라 권한을 다시 켠다(‘이번만 허용’이 풀려 마이크가 0으로만 들어온 일이 있었음, 2026-11-15). 이미 켜져 있으면 아무 일 없음.
