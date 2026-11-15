@@ -159,17 +159,29 @@ export class SpeechToText {
     const info = parseWav(wav);
     if (!isWhisperReady(info)) throw new AppError('invalid_input', '음성 형식을 바꿀 수 없음');
     if (info.seconds > maxSeconds) throw new AppError('invalid_input', `음성이 너무 김(${Math.round(info.seconds)}초, 최대 ${maxSeconds}초)`);
-    const server = await this.#ensure();
-    const form = new FormData();
-    form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
-    form.append('response_format', segments || filter ? 'verbose_json' : 'json');
+    const send = (srv) => {
+      const form = new FormData();
+      form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
+      form.append('response_format', segments || filter ? 'verbose_json' : 'json');
+      return this.fetchImpl(`${srv.baseUrl}/inference`, { method: 'POST', body: form, redirect: 'manual' });
+    };
+    let server = await this.#ensure();
     const t0 = performance.now();
     let res;
     try {
-      res = await this.fetchImpl(`${server.baseUrl}/inference`, { method: 'POST', body: form, redirect: 'manual' });
-    } catch (e) {
-      this.server = null; // 다음 요청 때 다시 띄운다
-      throw new AppError('stt_failed', `받아쓰기 서버 연결 실패: ${e.cause?.code ?? e.message}`);
+      res = await send(server);
+    } catch {
+      // 엔진이 죽었거나 연결이 끊겼으면(ECONNRESET 등) 남은 엔진을 끄고 한 번만 다시 띄워 재시도한다(2026-11-15 토스 프론트에서 연속 실패).
+      server.stop?.();
+      this.server = null;
+      try {
+        server = await this.#ensure();
+        res = await send(server);
+      } catch (e2) {
+        this.server = null; // 다음 요청 때 다시 띄운다
+        if (e2 instanceof AppError) throw e2;
+        throw new AppError('stt_failed', `받아쓰기 서버 연결 실패: ${e2.cause?.code ?? e2.message}`);
+      }
     }
     const body = Buffer.from(await res.arrayBuffer());
     if (!res.ok) throw new AppError('stt_failed', `받아쓰기 실패: HTTP ${res.status}`);

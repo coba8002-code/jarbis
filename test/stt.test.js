@@ -120,7 +120,7 @@ test('띄우는 도중 닫으면 다 뜬 서버를 바로 끈다', async (t) => 
   assert.equal(counter.stops, 1);
 });
 
-test('서버 오류는 stt_failed, 연결이 끊기면 다음에 다시 띄운다', async (t) => {
+test('서버 오류는 stt_failed, 연결이 끊기면 다시 띄워 한 번 재시도', async (t) => {
   const bad = await fakeWhisper({ status: 500 });
   t.after(() => bad.server.close());
   await assert.rejects(new SpeechToText({ launcher: launcherFor(bad).launcher, ffmpeg: null }).transcribe(tone(0.3)), { code: 'stt_failed' });
@@ -131,7 +131,7 @@ test('서버 오류는 stt_failed, 연결이 끊기면 다음에 다시 띄운�
   let n = 0;
   const stt = new SpeechToText({ ffmpeg: null, launcher: async () => { n += 1; return { baseUrl: n === 1 ? gone.baseUrl : ok.baseUrl, stop() {} }; } });
   await new Promise((r) => gone.server.close(r));
-  await assert.rejects(stt.transcribe(tone(0.3)), { code: 'stt_failed' });
+  // 연결이 끊기면 같은 요청 안에서 엔진을 다시 띄워 한 번 재시도한다(2026-11-15)
   assert.equal((await stt.transcribe(tone(0.3))).text, '다시 됨');
   assert.equal(n, 2);
 });
