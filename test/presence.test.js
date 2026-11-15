@@ -66,3 +66,46 @@ test('잠깐 보기: 그대로면 계속 쉼, 움직임이나 지난번과 다�
   p.tick(800_000);
   assert.equal(p.glance(800_000, half(), half()).seen, false, '잊은 뒤 첫 그림은 비교 기준만 됨');
 });
+
+test('얼굴 판정: 얼굴이 있으면 깨어나고, 얼굴 없음(모델이 돌았음)이면 움직임이 커도 안 깨어남(반사·조명 오탐 줄이기)', () => {
+  const p = createPresence();
+  p.start(0);
+  p.tick(200_000);
+  assert.equal(p.state, 'asleep');
+  // 움직임은 크지만 얼굴이 없음 → 화면 반사·조명 변화로 보고 안 깨어남
+  assert.equal(p.glance(200_000, flat(100), half(), false).person, false);
+  assert.equal(p.state, 'asleep');
+  // 움직임이 없어도 얼굴이 있으면 깨어남(가만히 선 사람)
+  const r = p.glance(230_000, flat(90), flat(90), true);
+  assert.equal(r.person, true);
+  assert.equal(r.changedState, true);
+  assert.equal(p.state, 'awake');
+  assert.equal(p.reason, 'camera');
+});
+
+test('사람 떠남: 깨어 있을 때 얼굴 없음이 연속 2번 이상이고 마지막 확인 뒤 75초 지나면 쉬는 화면으로', () => {
+  const p = createPresence();
+  p.start(0); // lastPerson=0
+  assert.equal(p.glance(30_000, flat(90), flat(90), false).changedState, false, '아직 75초 안 됨');
+  assert.equal(p.state, 'awake');
+  assert.equal(p.glance(60_000, flat(90), flat(90), false).changedState, false, '2번째지만 75초 전');
+  const r = p.glance(80_000, flat(90), flat(90), false);
+  assert.equal(r.changedState, true);
+  assert.equal(p.state, 'asleep');
+  assert.equal(p.reason, 'absent');
+});
+
+test('떠남 판단은 활동으로 리셋되고, 모델이 없으면(얼굴 미확인) 움직임만으로는 재우지 않는다', () => {
+  const p = createPresence();
+  p.start(0);
+  p.glance(40_000, flat(90), flat(90), false); // 없음 1번
+  p.activity(50_000); // 누름 → 사람 있음으로 리셋
+  assert.equal(p.glance(120_000, flat(90), flat(90), false).changedState, false, '리셋 뒤 75초 안 지남');
+  assert.equal(p.state, 'awake');
+  // 모델이 없을 때(faceSeen 미지정): 움직임 0이어도 떠남으로 세지 않음(가만히 있는 사람 보호)
+  const p2 = createPresence();
+  p2.start(0);
+  assert.equal(p2.glance(200_000, flat(90), flat(90)).changedState, false);
+  assert.equal(p2.glance(300_000, flat(90), flat(90)).changedState, false, '얼굴 미확인이면 안 잠');
+  assert.equal(p2.state, 'awake');
+});

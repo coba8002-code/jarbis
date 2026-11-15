@@ -43,6 +43,7 @@ import java.util.concurrent.TimeUnit;
  * camera: 카메라마다 프레임 몇 장을 받아 밝기(Y 평균·표준편차)를 logcat(태그 JarvisHw)에 남긴다. save=true면 JPEG를 앱 폴더에 남긴다.
  * sensors: 모든 센서를 seconds초 동안 읽어 축별 최소·최대와 이벤트 수를 남긴다(값이 실제로 변하는지).
  * speaker: 무음(0) PCM을 1초 재생해 출력 장치·재생 위치가 진행되는지만 본다(소리는 나지 않는다). tone=true면 작은 440Hz 소리를 0.5초 낸다.
+ * play: --es file <앱 폴더 안 WAV 이름> 을 스피커로 한 번 튼다(16비트 PCM WAV, 마이크 자체 시험용).
  * 화면이 앞에 있을 때 카메라가 열린다. 결과는 기기 밖으로 보내지 않는다.
  */
 public class HwProbe extends BroadcastReceiver {
@@ -54,12 +55,14 @@ public class HwProbe extends BroadcastReceiver {
         final String what = String.valueOf(intent.getStringExtra("what"));
         final boolean save = intent.getBooleanExtra("save", false);
         final boolean tone = intent.getBooleanExtra("tone", false);
+        final Intent in = intent;
         final int seconds = Math.max(1, Math.min(10, intent.getIntExtra("seconds", 3)));
         new Thread(() -> {
             try {
                 if (what.equals("camera")) camera(app, save);
                 else if (what.equals("sensors")) sensors(app, seconds);
                 else if (what.equals("speaker")) speaker(app, tone);
+                else if (what.equals("play")) play(app, String.valueOf(in.getStringExtra("file")));
                 else Log.w(TAG, "unknown what=" + what);
             } catch (Throwable t) {
                 Log.w(TAG, what + " error=" + t);
@@ -222,6 +225,32 @@ public class HwProbe extends BroadcastReceiver {
         AudioDeviceInfo r = t.getRoutedDevice();
         Log.i(TAG, "speaker tone=" + tone + " state=" + t.getPlayState() + " head=" + t.getPlaybackHeadPosition() + "/" + frames
                 + " routed=" + (r == null ? "?" : r.getType() + "/" + r.getProductName()));
+        t.stop(); t.release();
+    }
+
+    // ---- play a WAV (16-bit PCM) from the app's external files dir ----
+    static void play(Context c, String name) throws Exception {
+        File f = new File(c.getExternalFilesDir(null), new File(name).getName());
+        byte[] all = java.nio.file.Files.readAllBytes(f.toPath());
+        ByteBuffer b = ByteBuffer.wrap(all).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        int off = 12, rate = 16000, ch = 1, dataOff = -1, dataLen = 0;
+        while (off + 8 <= all.length) {
+            String id = new String(all, off, 4, "US-ASCII"); int size = b.getInt(off + 4);
+            if (id.equals("fmt ")) { ch = b.getShort(off + 10); rate = b.getInt(off + 12); }
+            if (id.equals("data")) { dataOff = off + 8; dataLen = Math.min(size, all.length - dataOff); break; }
+            off += 8 + size + (size & 1);
+        }
+        if (dataOff < 0) { Log.w(TAG, "play no data " + f); return; }
+        AudioTrack t = new AudioTrack.Builder()
+                .setAudioAttributes(new AudioAttributes.Builder().setUsage(AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build())
+                .setAudioFormat(new AudioFormat.Builder().setSampleRate(rate).setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setChannelMask(ch == 2 ? AudioFormat.CHANNEL_OUT_STEREO : AudioFormat.CHANNEL_OUT_MONO).build())
+                .setTransferMode(AudioTrack.MODE_STATIC).setBufferSizeInBytes(dataLen).build();
+        t.write(all, dataOff, dataLen);
+        t.play();
+        long ms = 1000L * dataLen / (rate * ch * 2);
+        Thread.sleep(ms + 300);
+        Log.i(TAG, "play " + f.getName() + " ms=" + ms + " head=" + t.getPlaybackHeadPosition());
         t.stop(); t.release();
     }
 }

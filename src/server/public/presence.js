@@ -9,6 +9,9 @@ export const DEFAULTS = Object.freeze({
   sleepMs: 180_000, // 3분이면 쉬는 화면
   glanceIdleMs: 15_000,
   glanceSleepMs: 30_000,
+  awakeGlanceMs: 25_000, // 깨어 있을 땐 25초마다 짧게 사람이 있는지 본다
+  absentMs: 75_000, // 마지막으로 사람 본 지 75초 지나면 쉬는 화면으로 갈 수 있다
+  absentStreak: 2, // 사람 없음이 연속 2번 이상 확인돼야 한다
   motionThreshold: 10, // 밝기 맞춘 뒤 픽셀 평균 차이(0~255)
 });
 
@@ -41,11 +44,15 @@ export function createPresence(options = {}) {
   let state = 'awake';
   let lastActive = 0;
   let lastGlance = -Infinity;
+  let lastPerson = 0; // 마지막으로 사람을 확인한 시각(떠남 판단용)
+  let absentCount = 0; // 사람 없음이 연속 몇 번 확인됐는지
   let ref = null; // 지난번 잠깐 보기의 그림(장면이 바뀌었는지 비교)
   let reason = 'start';
 
   const wake = (t, why) => {
     lastActive = t;
+    lastPerson = t; // 누름·근접·카메라로 깬 것은 모두 "사람 있음"
+    absentCount = 0;
     reason = why;
     const changed = state !== 'awake';
     state = 'awake';
@@ -56,7 +63,7 @@ export function createPresence(options = {}) {
     get state() { return state; },
     get reason() { return reason; },
     // 시작 시각
-    start(t) { lastActive = t; state = 'awake'; reason = 'start'; },
+    start(t) { lastActive = t; lastPerson = t; lastGlance = t; absentCount = 0; state = 'awake'; reason = 'start'; },
     // 누름·입력·대화 진행 중
     activity(t) { return wake(t, 'touch'); },
     // 근접 센서가 "가까움"을 알림
@@ -70,20 +77,35 @@ export function createPresence(options = {}) {
       return true;
     },
     // 지금 카메라로 잠깐 볼 차례인가(카메라 깨우기를 켰을 때만 화면이 묻는다)
+    // 깨어 있을 때도 저부하로 가끔 봐서 사람이 떠났는지 확인한다(화면의 '쓰는 중' 판단은 jarvis가 먼저 거른다)
     shouldGlance(t) {
-      if (state === 'awake') return false;
-      const every = state === 'asleep' ? o.glanceSleepMs : o.glanceIdleMs;
+      const every = state === 'asleep' ? o.glanceSleepMs : state === 'idle' ? o.glanceIdleMs : o.awakeGlanceMs;
       return t - lastGlance >= every;
     },
-    // 잠깐 보기 결과: 같은 순간 두 장(first, second)의 움직임 + 지난번 그림과의 장면 차이
-    glance(t, first, second) {
+    // 잠깐 보기 결과: 두 장(first, second)의 움직임 + 지난번 그림과의 장면 차이 + 얼굴 유무(faceSeen).
+    // faceSeen: true=얼굴 있음, false=얼굴 없음(모델이 돌았음), undefined/null=모델 없음(움직임만으로).
+    glance(t, first, second, faceSeen) {
       lastGlance = t;
       const moving = motionScore(first, second);
       const changed = ref ? motionScore(ref, second) : 0;
       ref = second;
-      const seen = moving >= o.motionThreshold || changed >= o.motionThreshold;
-      if (seen) wake(t, 'camera');
-      return { seen, moving, changed };
+      // 얼굴을 봤으면 그 판정을 믿어 조명 변화·화면 반사 오탐을 줄이고, 모델이 없을 때만 움직임으로 본다
+      const person = faceSeen === true ? true
+        : faceSeen === false ? false
+        : (moving >= o.motionThreshold || changed >= o.motionThreshold);
+      let changedState = false;
+      if (person) {
+        changedState = wake(t, 'camera');
+      } else if (faceSeen === false) {
+        // 가만히 있는 사람을 놓치지 않도록, 얼굴이 확실히 없을 때만 떠남으로 센다(움직임 0만으로는 안 샘)
+        absentCount += 1;
+        if (state === 'awake' && absentCount >= o.absentStreak && t - lastPerson >= o.absentMs) {
+          state = 'asleep';
+          reason = 'absent';
+          changedState = true;
+        }
+      }
+      return { seen: person, person, moving, changed, changedState };
     },
     // 카메라 깨우기를 끄거나 다시 켤 때 지난 그림을 버린다
     forget() { ref = null; lastGlance = -Infinity; },

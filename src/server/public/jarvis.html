@@ -977,6 +977,9 @@ async function micStop() {
     note('말을 받아 적지 못했어요. 다시 말하거나 글로 적어 주세요.', String(e.message));
   }
 }
+// 마이크를 켠 직후 0.9초는 말소리 판정에서 뺀다. 토스 프론트(es8316, 자동 이득 켬)는 켜질 때 크게 튀는 소리가 나서
+// 그걸 말로 알고 곧바로 끝내 버려, 정작 말은 담기지 않았다(2026-11-15).
+const MIC_WARMUP_MS = 900;
 async function micStart() {
   ambientPause();
   try {
@@ -994,13 +997,12 @@ async function micStart() {
   const analyser = mic.ctx.createAnalyser();
   analyser.fftSize = 1024;
   src.connect(analyser);
-  mic.cap = V.createPcmCapture({ inputRate: mic.ctx.sampleRate });
+  mic.cap = V.createPcmCapture({ inputRate: mic.ctx.sampleRate, preRollMs: 500 });
   mic.proc = mic.ctx.createScriptProcessor(4096, 1, 1);
   mic.proc.onaudioprocess = (e) => mic.cap?.push(e.inputBuffer.getChannelData(0));
   const mute = mic.ctx.createGain(); // 소리 0으로만 출력에 잇는다(소리를 내지 않음)
   mute.gain.value = 0;
   src.connect(mic.proc); mic.proc.connect(mute); mute.connect(mic.ctx.destination);
-  mic.cap.start({ preRoll: false });
   mic.seg = V.createSegmenter();
   mic.heard = false;
   mic.silentHw = true; // 한 번이라도 0이 아닌 샘플이 오면 false(내장 마이크 배선·믹서 꺼짐 구분)
@@ -1016,8 +1018,9 @@ async function micStart() {
     if (mic.silentHw && buf.some((x) => x !== 0)) mic.silentHw = false;
     const rms = V.rmsOf(buf);
     feedMic(rms);
+    if (performance.now() - mic.startedAt < MIC_WARMUP_MS) return;
     const ev = mic.seg.push(rms, performance.now());
-    if (ev === 'start') mic.heard = true;
+    if (ev === 'start') { mic.heard = true; mic.cap.start({ preRoll: true }); } // 말 시작 0.5초 앞부터 담는다
     else if (ev === 'end' && mic.heard) micStop();
     else if (!mic.heard && performance.now() - mic.startedAt > 8000) micStop(); // 8초 동안 말이 없으면 멈춤
   }, 50);
@@ -1062,6 +1065,7 @@ async function ambientStartMic() {
   mute.gain.value = 0;
   src.connect(amb.proc); amb.proc.connect(mute); mute.connect(amb.ctx.destination);
   amb.seg = V.createSegmenter({ endSilenceMs: 900, maxMs: 12000 });
+  amb.openedAt = performance.now();
   const buf = new Float32Array(analyser.fftSize);
   amb.timer = setInterval(() => {
     if (!amb.seg) return;
@@ -1069,6 +1073,7 @@ async function ambientStartMic() {
     const t = performance.now();
     const rms = V.rmsOf(buf);
     feedMic(rms);
+    if (t - amb.openedAt < MIC_WARMUP_MS) return;
     const ev = amb.seg.push(rms, t);
     if (ev === 'start') { amb.cap.start({ preRoll: true }); amb.utterStart = t; }
     // 기기가 말하는 중에는 3초까지만 담아 "멈춰"가 빨리 처리되게 한다
@@ -1335,7 +1340,11 @@ $('#back-talk').addEventListener('click', () => { showCheck(false); $('#tab-chec
 const presence = P.createPresence();
 presence.start(performance.now());
 const camUsable = Boolean(window.isSecureContext && navigator.mediaDevices?.getUserMedia);
-let camWake = camUsable && store.get('jarvis.camWake') === 'on';
+// 근접 센서가 없는 앱(토스 기기 등)에서는 처음 한 번 카메라 깨우기를 켠다. 사용자가 끈 'off'는 존중하고,
+// 앱이 아닌 브라우저(hasProximity 없음)에서는 기본값을 바꾸지 않는다.
+const savedCamWake = store.get('jarvis.camWake');
+const noProxApp = Boolean(app && app.hasProximity && app.hasProximity() === false);
+let camWake = camUsable && (savedCamWake === 'on' || (noProxApp && savedCamWake !== 'off'));
 let glancing = false;
 let camBusy = false; // 카메라를 한 곳에서만 쓰게(잠깐 보기·등록·누구인지 보기)
 const grabCanvas = document.createElement('canvas');
@@ -1352,6 +1361,7 @@ let clockTimer = null;
 function applyPresence() {
   const sleeping = presence.state === 'asleep';
   if (sleeping === asleep()) return;
+  console.info(`[presence] ${sleeping ? 'asleep' : 'awake'} reason=${presence.reason}`);
   document.body.classList.toggle('asleep', sleeping);
   $('#sleep').setAttribute('aria-hidden', String(!sleeping));
   for (const id of ['main', 'header', '#bar']) document.querySelector(id).inert = sleeping;
@@ -1432,8 +1442,13 @@ async function glance() {
     const first = grab(video);
     await pause(400);
     const second = grab(video);
-    const r = presence.glance(performance.now(), first, second);
-    if (r.seen) woke(true, big ? await whoIs(video) : null);
+    const faceSeen = await faceVisible(video); // 얼굴 확인(모델 없으면 null → 움직임만으로)
+    const r = presence.glance(performance.now(), first, second, faceSeen);
+    console.info(`[presence] cam person=${r.person} face=${faceSeen} move=${Math.round(r.moving)} scene=${Math.round(r.changed)} -> ${presence.state}`);
+    if (r.changedState) {
+      if (presence.state === 'awake') woke(true, big && r.person ? await whoIs(video) : null);
+      else applyPresence(); // 사람이 떠나 쉬는 화면으로
+    }
   } catch (e) {
     // 권한 거부·카메라 없음·다른 앱이 사용 중: 카메라로 깨우기를 끈다
     setCamWake(false);
@@ -1482,6 +1497,26 @@ function loadFaceApi() {
     return api;
   })().catch((e) => { faceApiLoading = null; throw e; });
   return faceApiLoading;
+}
+// 잠깐 보기에서 "사람 얼굴이 있나"만 가볍게 확인한다. 작은 tiny_face_detector만 처음 한 번 받고(큰 인식 모델은 안 받음),
+// 작은 입력(128)으로 판정한다. 모델을 못 받으면 null을 주어 움직임 비교로만 판단하게 둔다.
+let detectorLoading = null;
+function loadDetector() {
+  detectorLoading ??= (async () => {
+    const api = await import(`${FACE_API}/face-api.esm.js`);
+    try { await api.tf.setBackend('webgl'); } catch { await api.tf.setBackend('cpu'); }
+    await api.tf.ready();
+    await api.nets.tinyFaceDetector.loadFromUri(`${FACE_API}/model`);
+    return api;
+  })().catch((e) => { detectorLoading = null; throw e; });
+  return detectorLoading;
+}
+async function faceVisible(video) {
+  try {
+    const api = await loadDetector();
+    const r = await api.detectSingleFace(video, new api.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.5 }));
+    return Boolean(r);
+  } catch { return null; } // 모델을 못 받으면 움직임만으로 판단
 }
 async function describeFace(api, video) {
   const r = await api.detectSingleFace(video, new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.5 })).withFaceLandmarks(true).withFaceDescriptor();
@@ -1626,9 +1661,11 @@ if (camUsable) { $('#faces-card').hidden = false; renderPeople(); }
 // 1초마다: 대화·녹음 중이면 쓰는 중으로 보고, 시간에 따라 쉬는 화면으로, 차례가 되면 카메라로 잠깐 본다
 setInterval(() => {
   const t = performance.now();
-  if (currentState() !== 'idle' || face.chatPending || !$('#check').hidden || $('#picker').open || !$('#face-form').hidden) presence.activity(t);
+  // 쓰는 중(누름·말하기·듣기·답 읽기·등록·고르기)이면 사람 있음으로 보고, 카메라도 켜지 않는다(마이크 충돌·전력)
+  const busy = currentState() !== 'idle' || face.chatPending || !$('#check').hidden || $('#picker').open || !$('#face-form').hidden;
+  if (busy) presence.activity(t);
   if (presence.tick(t)) applyPresence();
-  if (camWake && !glancing && !document.hidden && presence.shouldGlance(t)) glance();
+  if (camWake && !glancing && !document.hidden && !busy && presence.shouldGlance(t)) glance();
 }, 1000);
 
 // ---------- 시작 ----------

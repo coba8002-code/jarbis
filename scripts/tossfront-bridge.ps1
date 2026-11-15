@@ -17,16 +17,12 @@ $target = if ($Serial) { @('-s', $Serial) } else { @() }
 # 기기 오디오 HAL이 믹서 설정을 card0(HDMI)에만 걸어 es8316의 마이크·스피커 경로가 꺼진 채로 남는다.
 # 부팅할 때마다(부팅 ID가 바뀌면) 잠깐 adb root로 아래 값을 넣고 바로 adb unroot 한다. 파티션은 건드리지 않는다(재부팅하면 사라짐).
 $MixerCmds = @(
-  "tinymix -D 1 'Differential Mux' 'lin1-rin1 with 20db Boost'",
+  # 마이크 쪽만 넣는다. 입력 선택(Differential Mux)과 스피커 쪽(DAC 스위치·헤드폰 볼륨)은 오디오 HAL이 녹음·재생 때마다 직접 다시 맞춘다(2026-11-15 확인).
   "tinymix -D 1 'Digital Mic Mux' 'dmic disable'",
   "tinymix -D 1 'Mic Boost Switch' 1",
   "tinymix -D 1 'ADC PGA Gain Volume' 10",
   "tinymix -D 1 'ADC Capture Volume' 192",
-  "tinymix -D 1 'ALC Capture Switch' 1",
-  "tinymix -D 1 'Left Headphone Mixer Left DAC Switch' 1",
-  "tinymix -D 1 'Right Headphone Mixer Right DAC Switch' 1",
-  "tinymix -D 1 'Headphone Playback Volume' 2 2",
-  "tinymix -D 1 'Headphone Mixer Volume' 6 6"
+  "tinymix -D 1 'ALC Capture Switch' 1"
 )
 function Set-TossMixer([string]$AdbExe, [string[]]$Target) {
   & $AdbExe @Target root 2>$null | Out-Null
