@@ -26,6 +26,19 @@ test('첫 연결이 끊기면 엔진을 다시 띄워 한 번 재시도한다', 
   assert.equal(launches, 2); assert.equal(stops, 1);
 });
 
+test('거르기(filter) 요청의 재시도는 json 형식으로 보낸다(잡음+verbose_json에서 엔진이 죽는 문제)', async () => {
+  const formats = [];
+  const launcher = async () => ({ baseUrl: 'http://e', stop() {}, isAlive: () => true });
+  const fetchImpl = async (url, opts) => {
+    formats.push(opts.body.get('response_format'));
+    if (formats.length === 1) { const e = new TypeError('fetch failed'); e.cause = { code: 'ECONNRESET' }; throw e; }
+    return new Response(JSON.stringify({ text: '' }), { status: 200 });
+  };
+  const r = await new SpeechToText({ launcher, fetchImpl }).transcribe(wav16k(), { filter: true });
+  assert.deepEqual(formats, ['verbose_json', 'json']);
+  assert.equal(r.text, '');
+});
+
 test('재시도도 끊기면 stt_failed', async () => {
   const launcher = async () => ({ baseUrl: 'http://e', stop() {}, isAlive: () => true });
   const fetchImpl = async () => { const e = new TypeError('fetch failed'); e.cause = { code: 'ECONNRESET' }; throw e; };

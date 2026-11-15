@@ -159,10 +159,10 @@ export class SpeechToText {
     const info = parseWav(wav);
     if (!isWhisperReady(info)) throw new AppError('invalid_input', '음성 형식을 바꿀 수 없음');
     if (info.seconds > maxSeconds) throw new AppError('invalid_input', `음성이 너무 김(${Math.round(info.seconds)}초, 최대 ${maxSeconds}초)`);
-    const send = (srv) => {
+    const send = (srv, format = segments || filter ? 'verbose_json' : 'json') => {
       const form = new FormData();
       form.append('file', new Blob([wav], { type: 'audio/wav' }), 'audio.wav');
-      form.append('response_format', segments || filter ? 'verbose_json' : 'json');
+      form.append('response_format', format);
       return this.fetchImpl(`${srv.baseUrl}/inference`, { method: 'POST', body: form, redirect: 'manual' });
     };
     let server = await this.#ensure();
@@ -176,7 +176,9 @@ export class SpeechToText {
       this.server = null;
       try {
         server = await this.#ensure();
-        res = await send(server);
+        // whisper-server v1.9.2는 잡음뿐인 녹음을 verbose_json으로 받으면 죽는다(2026-11-15 실측, 같은 녹음을 json으로는 처리).
+        // 그래서 재시도는 구간이 꼭 필요할 때(segments)만 verbose_json, 아니면 json(구간 없음 → 전체 글로 거른다).
+        res = await send(server, segments ? 'verbose_json' : 'json');
       } catch (e2) {
         this.server = null; // 다음 요청 때 다시 띄운다
         if (e2 instanceof AppError) throw e2;

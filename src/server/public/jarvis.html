@@ -948,6 +948,7 @@ const micUsable = Boolean(window.isSecureContext && navigator.mediaDevices?.getU
 const mic = { stream: null, ctx: null, proc: null, timer: null, cap: null, seg: null, heard: false, startedAt: 0 };
 function micReset() {
   clearInterval(mic.timer);
+  app?.micRouteStop?.(); // 블루투스로 돌려 둔 입력을 되돌린다
   if (mic.proc) mic.proc.onaudioprocess = null;
   mic.stream?.getTracks().forEach((t) => t.stop());
   mic.ctx?.close();
@@ -963,7 +964,7 @@ async function micStop() {
   const ms = mic.cap.recordedMs;
   const wav = mic.cap.stop({ normalize: true });
   const gain = mic.cap.lastGain;
-  const lv = { heard: mic.heard, ms: Math.round(ms), peak: mic.peak.toFixed(3), rmsMax: mic.rmsMax.toFixed(4), noise: mic.seg ? mic.seg.level().toFixed(4) : '-', gain: gain.toFixed(1), why: mic.why };
+  const lv = { heard: mic.heard, ms: Math.round(ms), peak: mic.peak.toFixed(3), rmsMax: mic.rmsMax.toFixed(4), noise: mic.seg ? mic.seg.level().toFixed(4) : '-', gain: gain.toFixed(1), why: mic.why, input: mic.route ?? '-' };
   console.info('[mic] stop ' + Object.entries(lv).map(([k, v]) => `${k}=${v}`).join(' '));
   micReset();
   if (mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 앱의 마이크 권한(‘이번만 허용’은 곧 풀려요)을 확인하고, 그래도 0이면 USB 마이크를 꽂아 주세요.'); return; }
@@ -989,12 +990,36 @@ const MIC_WARMUP_MS = 900;
 // 토스 프론트 내장 마이크는 10~20cm 말소리도 0.02(이전 기준)를 못 넘어 녹음을 버렸다(2026-11-15).
 const MIC_MIN_LEVEL = 0.006;
 const MIC_FORCE_MS = 6000;
+// 여는 중(권한·장치 준비 수 초)에 또 누르면 두 번째 누름은 무시한다. 예전엔 둘 다 열려 이전 수집기가 새 녹음에 계속 담아
+// 녹음 길이가 실제의 약 4배가 됐다(2026-11-15 토스 프론트).
 async function micStart() {
+  if (mic.opening || mic.stream) return;
+  mic.opening = true;
+  try { await micOpen(); } finally { mic.opening = false; }
+}
+// 블루투스 헤드셋(통화용 SCO)이 연결돼 있으면 앱이 입력을 그쪽으로 돌린다. 연결될 때까지 최대 4초 기다리고, 안 되면 내장 마이크.
+async function micRouteBt() {
+  if (!app?.micRouteStart) return 'builtin';
+  let r = String(app.micRouteStart());
+  if (!r.startsWith('bt-wait')) return r;
+  for (let i = 0; i < 20; i += 1) {
+    await new Promise((ok) => setTimeout(ok, 200));
+    r = String(app.micRouteState());
+    if (r.startsWith('bt:')) return r;
+  }
+  app.micRouteStop?.();
+  return 'builtin(bt-timeout)';
+}
+const micInputLabel = (route) => (String(route).startsWith('bt:') ? `블루투스 ${String(route).slice(3)}` : '내장 마이크');
+async function micOpen() {
   ambientPause();
+  mic.route = await micRouteBt();
+  console.info(`[mic] input=${mic.route}`);
   try {
     mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true } });
   } catch (e) {
     console.info(`[mic] open failed ${e.name}`);
+    app?.micRouteStop?.();
     status(e.name === 'NotAllowedError' ? '마이크를 쓸 수 있게 허용해 주세요. 주소창 옆 권한 메뉴에서 바꿀 수 있어요.' : e.name === 'NotFoundError' ? '마이크를 찾지 못했어요. 마이크를 연결해 주세요.' : '마이크를 열지 못했어요. 다른 앱이 쓰고 있다면 닫고 다시 눌러 주세요.');
     ambientResume();
     return;
@@ -1009,7 +1034,7 @@ async function micStart() {
   src.connect(analyser);
   mic.cap = V.createPcmCapture({ inputRate: mic.ctx.sampleRate, preRollMs: 500 });
   mic.proc = mic.ctx.createScriptProcessor(4096, 1, 1);
-  mic.proc.onaudioprocess = (e) => mic.cap?.push(e.inputBuffer.getChannelData(0));
+  { const cap = mic.cap; mic.proc.onaudioprocess = (e) => cap.push(e.inputBuffer.getChannelData(0)); } // 이 녹음의 수집기에만 담는다
   const mute = mic.ctx.createGain(); // 소리 0으로만 출력에 잇는다(소리를 내지 않음)
   mute.gain.value = 0;
   src.connect(mic.proc); mic.proc.connect(mute); mute.connect(mic.ctx.destination);
@@ -1023,7 +1048,7 @@ async function micStart() {
   $('#mic').setAttribute('aria-pressed', 'true');
   $('#mic').setAttribute('aria-label', '말하기 끝내기');
   $('#tip-mic').textContent = '말하기 끝내기';
-  status('듣고 있어요. 말을 마치면 자동으로 멈춰요.');
+  status(`듣고 있어요(${micInputLabel(mic.route)}). 말을 마치면 자동으로 멈춰요.`);
   mic.timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
     if (mic.silentHw && buf.some((x) => x !== 0)) mic.silentHw = false;
@@ -1259,17 +1284,18 @@ async function buildChecks() {
     button('mic', '마이크 시험', async (e) => {
       e.target.disabled = true;
       let stream;
+      const route = await micRouteBt();
       try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true } }); } // 말하기 버튼과 같은 설정으로 시험
-      catch (err) { set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 마이크를 허용해 주세요.' : err.name === 'NotFoundError' ? '마이크가 없어요.' : err.message); e.target.disabled = false; return; }
+      catch (err) { app?.micRouteStop?.(); set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 마이크를 허용해 주세요.' : err.name === 'NotFoundError' ? '마이크가 없어요.' : err.message); e.target.disabled = false; return; }
       const ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(an);
       const buf = new Float32Array(an.fftSize); let peak = 0; let any = false; const t0 = performance.now();
-      const label = stream.getAudioTracks()[0]?.label || '기본 마이크(기기가 이름을 주지 않음)';
+      const label = `${micInputLabel(route)} · ${stream.getAudioTracks()[0]?.label || '이름 없음'}`;
       const tick = setInterval(() => {
         an.getFloatTimeDomainData(buf); const r = V.rmsOf(buf); peak = Math.max(peak, r); if (!any && buf.some((x) => x !== 0)) any = true;
         meter.firstChild.style.width = `${Math.min(100, Math.round(r * 400))}%`;
         if (performance.now() - t0 > 3000) {
-          clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); ctx.close(); meter.firstChild.style.width = '0';
+          clearInterval(tick); stream.getTracks().forEach((t) => t.stop()); ctx.close(); app?.micRouteStop?.(); meter.firstChild.style.width = '0';
           if (!any) { set('mic', 'bad', `열렸지만 신호가 전혀 없어요(소리 크기 0, ${label}). 마이크 권한이 풀렸거나 기기 마이크 경로가 꺼져 있어요. 권한을 ‘앱 사용 중에만 허용’으로 두고, 그래도 0이면 USB 마이크를 꽂아 주세요.`); e.target.disabled = false; return; }
           set('mic', peak > 0.02 ? 'ok' : 'warn', peak > 0.02 ? `소리 들림 (${label}, 최대 ${peak.toFixed(3)})` : `열렸지만 소리가 거의 없어요 (${label}, 최대 ${peak.toFixed(3)}). 말하면서 다시 시험해 보세요.`);
           e.target.disabled = false;
@@ -1529,8 +1555,10 @@ function loadDetector() {
 async function faceVisible(video) {
   try {
     const api = await loadDetector();
-    const r = await api.detectSingleFace(video, new api.TinyFaceDetectorOptions({ inputSize: 128, scoreThreshold: 0.5 }));
-    return Boolean(r);
+    const all = await api.detectAllFaces(video, new api.TinyFaceDetectorOptions({ inputSize: 224, scoreThreshold: 0.2 }));
+    const best = all.reduce((m, d) => Math.max(m, d.score), 0);
+    console.info(`[presence] face score=${best.toFixed(2)} size=224`);
+    return best >= 0.4;
   } catch { return null; } // 모델을 못 받으면 움직임만으로 판단
 }
 async function describeFace(api, video) {

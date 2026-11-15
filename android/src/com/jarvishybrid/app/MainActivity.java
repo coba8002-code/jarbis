@@ -53,6 +53,7 @@ import java.util.Locale;
  * - 화면에 더해 주는 것(window.JarvisApp): 근접 센서, 기기 음성(TTS), 쉬는 화면일 때 밝기 낮추기, 연결 설정 다시 열기.
  */
 public class MainActivity extends Activity implements SensorEventListener {
+    private BtMic btMic;
     private static final String PREFS = "jarvis";
     private static final int REQ_MEDIA = 1;
     private static final int BG = Color.rgb(0xff, 0xfa, 0xf3);
@@ -81,6 +82,7 @@ public class MainActivity extends Activity implements SensorEventListener {
     @Override
     protected void onCreate(Bundle state) {
         super.onCreate(state);
+        btMic = new BtMic(this);
         prefs = getSharedPreferences(PREFS, MODE_PRIVATE);
         getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // 키오스크: 잠금 화면 위에도 보이고, 부팅 때 화면을 켠다(토스 기기처럼 늘 켜 두는 화면용)
@@ -328,6 +330,9 @@ public class MainActivity extends Activity implements SensorEventListener {
         if (need.isEmpty()) { request.deny(); return; }
         List<String> missing = new ArrayList<>();
         for (String p : need) if (checkSelfPermission(p) != PackageManager.PERMISSION_GRANTED) missing.add(p);
+        // Android 12 이상은 블루투스 헤드셋 마이크를 쓰려면 BLUETOOTH_CONNECT도 필요(없어도 내장 마이크로는 녹음)
+        if (Build.VERSION.SDK_INT >= 31 && need.contains(Manifest.permission.RECORD_AUDIO)
+                && checkSelfPermission(Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) missing.add(Manifest.permission.BLUETOOTH_CONNECT);
         if (missing.isEmpty()) { grantAllowed(request); return; }
         if (pendingRequest != null) pendingRequest.deny();
         pendingRequest = request;
@@ -405,6 +410,7 @@ public class MainActivity extends Activity implements SensorEventListener {
 
     @Override
     protected void onDestroy() {
+        if (btMic != null) btMic.stop();
         cancelRetry();
         if (tts != null) tts.shutdown();
         if (web != null) web.destroy();
@@ -442,6 +448,12 @@ public class MainActivity extends Activity implements SensorEventListener {
                 getWindow().setAttributes(lp);
             });
         }
+
+        // 블루투스 헤드셋 마이크(BtMic): 녹음 시작·끝에 화면이 부른다. 값은 "bt:<이름>" / "bt-wait..." / "builtin"
+        @JavascriptInterface public String micInput() { return btMic.available(); }
+        @JavascriptInterface public String micRouteStart() { return btMic.start(); }
+        @JavascriptInterface public String micRouteState() { return btMic.state(); }
+        @JavascriptInterface public void micRouteStop() { btMic.stop(); }
 
         @JavascriptInterface public void openSetup() {
             later(() -> showSetup(null, false));
