@@ -6,11 +6,14 @@ import { redactSecrets } from '../src/security/redact.js';
 import { MemorySuggester, parseFacts, buildExtractRequest } from '../src/memory/suggest.js';
 import { createServices } from '../src/app/services.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, fakeKey, FAKE_KEY_MARK } from './helpers.js';
+
+const KEY = fakeKey('sk-proj');
+const MARK = new RegExp(FAKE_KEY_MARK);
 
 test('비밀 값 가리기: 키·토큰·이메일·카드·비밀번호·인증 번호, 보통 글은 그대로', () => {
-  const r = redactSecrets('내 키는 sk-proj-abcdefghijklmnopqrstuvwx 이고 메일은 me@example.com, 비밀번호: hunter22, 카드 1234 5678 9012 3456, 인증번호 123456');
-  assert.doesNotMatch(r.text, /abcdefghijklmnop|me@example\.com|hunter22|9012|123456/);
+  const r = redactSecrets(`내 키는 ${KEY} 이고 메일은 me@example.com, 비밀번호: hunter22, 카드 1234 5678 9012 3456, 인증번호 123456`);
+  assert.doesNotMatch(r.text, /testonlyfake|me@example\.com|hunter22|9012|123456/);
   assert.match(r.text, /\[가림:OpenAI 키\]/);
   assert.ok(r.count >= 5);
   assert.equal(redactSecrets('내일 3시에 서울역에서 만나').text, '내일 3시에 서울역에서 만나');
@@ -22,7 +25,7 @@ test('사실 뽑기 요청은 비밀을 가리고, 답은 JSON의 짧은 문장�
   const req = buildExtractRequest([{ question: '내 비밀번호: abc12345 기억해', answer: '알겠어요' }], ['사용자는 커피를 좋아한다']);
   assert.doesNotMatch(req.messages[1].content, /abc12345/);
   assert.match(req.messages[1].content, /사용자는 커피를 좋아한다/);
-  assert.deepEqual(parseFacts('{"facts": ["사용자는 매운 음식을 못 먹는다", 3, "", "sk-proj-abcdefghijklmnopqrstuvwx"]}'), ['사용자는 매운 음식을 못 먹는다']);
+  assert.deepEqual(parseFacts(`{"facts": ["사용자는 매운 음식을 못 먹는다", 3, "", "${KEY}"]}`), ['사용자는 매운 음식을 못 먹는다']);
   assert.deepEqual(parseFacts('잘 모르겠어요'), []);
 });
 
@@ -62,9 +65,9 @@ test('대화하면 기억 제안 쪽에 기록되고, 외부 공급자로 갈 �
   const far = { name: 'far', describe: () => ({ name: 'far', baseUrl: 'https://far.invalid', model: 'm', remote: true }), async *stream(req) { got.push(req); yield { type: 'delta', text: '네' }; yield { type: 'done', finishReason: 'stop' }; } };
   const services = createServices({ dataDir: dirname(tempDbPath()), providers: new ProviderRegistry({ far }), speaker: { speak: () => ({ done: Promise.resolve(), kill() {} }) } });
   t.after(() => services.close());
-  const r = await services.chat.ask({ provider: 'far', question: '이 키 sk-proj-abcdefghijklmnopqrstuvwx 맞아?' });
+  const r = await services.chat.ask({ provider: 'far', question: `이 키 ${KEY} 맞아?` });
   assert.equal(r.redacted, 1);
-  assert.doesNotMatch(got[0].messages.at(-1).content, /abcdefghijklmnop/);
+  assert.doesNotMatch(got[0].messages.at(-1).content, MARK);
   assert.equal(services.memorySuggest.exchanges.length, 1);
 });
 

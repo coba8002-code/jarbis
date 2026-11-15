@@ -7,7 +7,7 @@ import { transcriptChunks, parseSummary, parseMmss, mmss, buildSummaryRequest } 
 import { createServices } from '../src/app/services.js';
 import { createAppServer } from '../src/server/server.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, fakeKey } from './helpers.js';
 
 const seg = (s, text) => ({ start_ms: s * 1000, end_ms: s * 1000 + 4000, text });
 
@@ -34,7 +34,7 @@ test('모델 답 읽기: 첫 {...}만, 칸·개수 제한, 녹취 밖 시간은 
   const text = `정리했어요:\n${JSON.stringify({
     summary: '  출시 일정을 논의했다. ',
     opinions: [{ point: '다음 주 출시가 좋다', at: '00:10' }, { point: '테스트가 더 필요하다', at: '59:59' }, '문자열 의견', { point: '' }],
-    decisions: ['금요일에 다시 보기', 42, 'sk-ant-abcdefghijklmnopqrstuvwxyz123456'],
+    decisions: ['금요일에 다시 보기', 42, fakeKey('sk-ant', 32)],
     todos: [{ task: '시험 목록 만들기', who: '민수' }, '자료 보내기'],
     open: ['예산은?'],
     extra: 'x',

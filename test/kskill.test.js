@@ -5,7 +5,7 @@ import { dirname } from 'node:path';
 import { loadCatalog, routePatterns, validatePlan, KSkills } from '../src/skills/kskill.js';
 import { createServices } from '../src/app/services.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, fakeKey } from './helpers.js';
 
 test('설명서 사본: 조회 전용 스킬만, 경로가 있고, 출처·라이선스가 함께 있다', () => {
   const list = loadCatalog();
@@ -23,7 +23,7 @@ test('경로 확인: 그 스킬 설명서의 /v1/ 경로만, 값은 짧은 글·
   for (const bad of ['/v1/other/route', 'https://evil.example/v1/korea-weather/now', '/v1/korea-weather/now/../../admin', '/v1/kopis/performances/a/b', '/v1/kopis/performances/..', '/v1/kopis/performances/%2e%2e']) {
     assert.throws(() => validatePlan(skill, { path: bad }), { code: 'invalid_input' }, bad);
   }
-  const q = validatePlan(skill, { path: '/v1/korea-weather/now', query: { q: 'sk-proj-abcdefghijklmnopqrstuvwx', obj: { a: 1 }, 'bad key': 'x', long: 'x'.repeat(200) } }).query;
+  const q = validatePlan(skill, { path: '/v1/korea-weather/now', query: { q: fakeKey('sk-proj'), obj: { a: 1 }, 'bad key': 'x', long: 'x'.repeat(200) } }).query;
   assert.deepEqual(Object.keys(q), ['q']);
   assert.match(q.q, /가림/);
 });

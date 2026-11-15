@@ -10,7 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { createServices } from '../src/app/services.js';
 import { createAppServer } from '../src/server/server.js';
 import { ProviderRegistry } from '../src/providers/registry.js';
-import { tempDbPath } from './helpers.js';
+import { tempDbPath, fakeKey } from './helpers.js';
 
 const pexec = promisify(execFile);
 const CLI = fileURLToPath(new URL('../src/cli.js', import.meta.url));
@@ -106,7 +106,7 @@ test('잘못된 검색어는 미션을 만들지 않는다(빈 값·100자 초�
     const r = await call('POST', '/api/quick/memory-search', { params });
     assert.equal(r.status, 400, JSON.stringify(params));
   }
-  const secret = await call('POST', '/api/quick/meeting-search', { params: { q: 'sk-abcdefghijklmnopqrstuvwxyz0123456789' } });
+  const secret = await call('POST', '/api/quick/meeting-search', { params: { q: fakeKey('sk', 36) } });
   assert.equal(secret.status, 400);
   assert.equal(secret.json.error.code, 'rejected_secret');
   assert.deepEqual((await call('GET', '/api/missions')).json, []);
