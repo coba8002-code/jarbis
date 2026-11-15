@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { platform } from 'node:os';
 import { AppError } from '../errors.js';
 import { ProviderError } from '../providers/contract.js';
+import { describeLive } from '../providers/adapters.js';
 import { checkEcho } from '../voice/echo.js';
 import { MAX_IMAGE_BYTES, IMAGE_STATES } from '../character/avatar-images.js';
 import { listPresets, adoptPreset, applyMascot, CHARACTER_PRESETS } from '../character/presets.js';
@@ -200,7 +201,8 @@ export function createAppServer(services, { token = randomBytes(24).toString('he
     ['GET', /^\/api\/memory-suggestions$/, () => services.memorySuggest.list()],
     ['POST', /^\/api\/memory-suggestions\/(\d+)\/accept$/, ([, id], q, b) => services.memorySuggest.accept(toId(id), b.content)],
     ['DELETE', /^\/api\/memory-suggestions\/(\d+)$/, ([, id]) => services.memorySuggest.dismiss(toId(id))],
-    ['GET', /^\/api\/providers$/, () => services.providers.names().map((n) => services.providers.describe(n))],
+    // 이 PC 안 서버(Llama·Ollama)는 실제로 켜져 있는지까지 본다(15초 캐시, 1.5초 안에 답 없으면 꺼짐)
+    ['GET', /^\/api\/providers$/, () => describeLive(services.providers)],
     // 메인 화면 AI 고르기: Ollama에 받아 둔 모델(라마 등) 목록. 이 기기 안 Ollama만 묻는다.
     ['GET', /^\/api\/providers\/ollama\/models$/, async () => (await services.providers.providers.ollama?.models?.()) ?? []],
     // signal: 화면이 답을 받기 전에 연결을 끊으면(새로 고침·닫기) 생성을 끊는다(2026-11-14 실제 실행 QA).

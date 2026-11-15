@@ -1464,3 +1464,12 @@ holdout에서 아직 놓친 10개: "…어떻게 돼?"로 묻는 나이·둘레�
 - 제안(안 넣음): 플러그인 상점·웹훅(외부 전송·보안 검토 필요), 앞에 있는 프로그램 따라 페이지 자동 바꾸기, PC가 잠겼을 때 PC 조작 막기
 
 검사: 전체 npm test 406개 통과(새: shortcuts-more 7개). 헤드리스 Edge(가짜 PC 실행기) 800×1280: 설정에서 페이지 추가·이름 바꾸기, 여러 동작(단축키→0.5초→글자 입력) + 길게 누르기(mute) + 확인 버튼, 시계·PC 상태 버튼, 복사 → 스트림덱 탭 2개, 시계·CPU 값 보임, 확인 창 → 실행(ctrl+f9 · 글자 · mute 순서 기록), 오른쪽 클릭 = 길게, 칸 3 고르기.
+
+## 2026-11-15 적용 안 된 기능 점검 (사용자 요청 "아직 적용안된 기능들이 있는데 확인해줘")
+
+- [x] T388 이 PC 기기용 서버(47989, Tailscale·HTTPS)가 오후 3:33에 켠 옛 코드로 돌아 새 화면 파일(top-menu.js)을 못 줘서 메인 화면이 "준비 중…"에서 멈춤(회의봇·스트림덱·설정 창 안 보임) → 새 코드로 다시 켬(첫 시도는 앞 프로세스가 덜 꺼져 disk I/O error, 데이터 quick_check ok 확인 뒤 다시 켜서 정상). 다시 확인: 회의봇·스트림덱·톱니·바로 가기 6개·스피커 보임, /api/shortcuts/stats 200
+- 47989 서버에서 아직 안 켜진 것(설정·사람 몫): k-skill 꺼짐·기본 위치 없음(대기화면·브리핑 날씨 안 나옴) · 구글 연결 정보 없음(configured=false, 일정·할 일·대기화면 목록 비어 있음) · Claude 외부 전송 꺼짐 · Codex·Grok 모델 이름 없음 · 단축키는 기본 버튼 6개뿐
+- [x] T389 Llama가 "쓸 수 있음"으로 잘못 보이던 문제: 8080에는 llama-server가 아니라 Open WebUI가 떠 있었음. 이 PC 안 서버(Llama·Ollama)는 목록을 볼 때 실제로 물어봄(1.5초, 15초 캐시, 모델 목록 모양인지까지 확인, 외부 주소는 안 물음) → "127.0.0.1:8080에 llama-server가 아닌 다른 프로그램이 있음"으로 보이고 AI 고르기에서 못 고름 (adapters.js probe·describeLive, GET /api/providers)
+- [x] T390 dist 꾸러미 다시 만듦(같은 규칙: git 파일 + 새 파일, .claude·.specify 빼고, .env.local·data 없음): jarvis-update.zip 350개 파일 SHA-256 ce65ce1ff459431fd95d41d2ec18a1b4128e61b8c8105f702988552d7b1cf2d4 · jarvis-debug.apk 0.2.6 그대로(앱 코드 바뀐 것 없음) 76ff1be64e4645f7d762a0c70b00ffa938369df369f031247a741b5c7ec1344d · apply-update.cmd · SHA256.txt. 풀어서 단축키·설정 창·Llama 확인·서버 검사 33개 통과
+
+검사: 전체 npm test 408개 통과(새: provider-probe 2개). 47989 서버 다시 켬: Llama "다른 프로그램이 있음", Ollama 쓸 수 있음, AI 고르기 창에서 Llama 회색·이유 표시.

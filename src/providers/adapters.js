@@ -210,5 +210,46 @@ export function createHttpProviders({ env = process.env, fetchImpl = globalThis.
   for (const [name, p] of Object.entries(providers)) {
     p.describe = () => describeFor(name, env);
   }
+  // 이 PC 안 서버(Llama·Ollama)는 설정만 보지 않고 실제로 켜져 있는지 짧게 묻는다(2026-11-15: llama-server가 꺼져 있는데 "쓸 수 있음"으로 보이던 문제).
+  const cache = new Map();
+  for (const name of ['llama', 'ollama']) {
+    providers[name].probe = async () => {
+      const baseUrl = (env[envName(name, 'BASE_URL')] ?? PROVIDER_DEFAULTS[name].baseUrl).replace(/\/+$/, '');
+      if (!isLoopback(baseUrl)) return { ready: true, reason: '' }; // 외부 주소는 묻지 않는다
+      const hit = cache.get(name);
+      if (hit && Date.now() - hit.at < PROBE_CACHE_MS) return hit.r;
+      const host = new URL(baseUrl).host;
+      let r;
+      try {
+        const res = await fetchImpl(name === 'ollama' ? `${baseUrl}/api/tags` : `${baseUrl}/models`, { signal: AbortSignal.timeout(1500) });
+        if (!res.ok) {
+          await res.body?.cancel?.().catch?.(() => {});
+          r = { ready: false, reason: `${PROVIDER_LABELS[name]} 서버가 제대로 답하지 않음(HTTP ${res.status})` };
+        } else {
+          // 같은 포트에 다른 프로그램(예: 8080의 Open WebUI)이 있을 수 있어 모델 목록 모양인지 본다
+          let j = null;
+          try { j = JSON.parse((await res.text()).slice(0, 200_000)); } catch { j = null; }
+          const okShape = name === 'ollama' ? Array.isArray(j?.models) : Array.isArray(j?.data);
+          r = okShape ? { ready: true, reason: '' } : { ready: false, reason: `${host}에 ${name === 'llama' ? 'llama-server' : 'Ollama'}가 아닌 다른 프로그램이 있음` };
+        }
+      } catch {
+        r = { ready: false, reason: name === 'llama' ? `이 PC에 llama-server가 켜져 있지 않음(${host})` : `이 PC에 Ollama가 켜져 있지 않음(${host})` };
+      }
+      cache.set(name, { at: Date.now(), r });
+      return r;
+    };
+  }
   return providers;
+}
+export const PROBE_CACHE_MS = 15_000;
+
+// 목록 보기용: 설정으로는 쓸 수 있어도, 실제로 물어볼 수 있는 것(probe)은 켜져 있는지까지 본다.
+export async function describeLive(registry) {
+  return Promise.all(registry.names().map(async (n) => {
+    const d = registry.describe(n);
+    const p = registry.providers?.[n];
+    if (d.ready === false || typeof p?.probe !== 'function') return d;
+    const r = await p.probe();
+    return r.ready ? d : { ...d, ...r };
+  }));
 }
