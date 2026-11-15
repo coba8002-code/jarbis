@@ -96,9 +96,15 @@ export function createPcmCapture({ inputRate, outputRate = 16000, preRollMs = 80
       ringLen = 0;
     },
     // 녹음을 멈추지 않고 지금까지의 WAV를 만든다(에코 확인용).
-    wav() { return encodeWav(downsample(join(rec ?? [], recLen), inputRate, outputRate), outputRate); },
-    stop() {
-      const out = this.wav();
+    // normalize: true면 작은 녹음을 소프트웨어로 키운다(normalizeGain). 마지막에 쓴 배율은 lastGain.
+    lastGain: 1,
+    wav({ normalize = false } = {}) {
+      let all = join(rec ?? [], recLen);
+      if (normalize) { const r = normalizeGain(all); all = r.samples; this.lastGain = r.gain; } else this.lastGain = 1;
+      return encodeWav(downsample(all, inputRate, outputRate), outputRate);
+    },
+    stop(opts) {
+      const out = this.wav(opts);
       rec = null;
       recLen = 0;
       return out;
@@ -133,6 +139,18 @@ export function encodeWav(pcm, rate) {
   ascii(36, 'data'); v.setUint32(40, pcm.length * 2, true);
   for (let i = 0; i < pcm.length; i += 1) v.setInt16(44 + i * 2, pcm[i], true);
   return bytes;
+}
+
+// 작은 녹음 키우기(소프트웨어 증폭). 가장 큰 소리가 targetPeak가 되도록 배율을 정하되 1~maxGain 사이로 묶는다.
+// 내장 마이크 감도가 낮은 기기(토스 프론트 es8316)에서 받아쓰기 엔진이 말소리를 놓치지 않게 한다(2026-11-15).
+export function normalizeGain(samples, { targetPeak = 0.9, maxGain = 16 } = {}) {
+  let peak = 0;
+  for (let i = 0; i < samples.length; i += 1) { const a = Math.abs(samples[i]); if (a > peak) peak = a; }
+  const gain = peak > 0 ? Math.max(1, Math.min(maxGain, targetPeak / peak)) : 1;
+  if (gain === 1) return { samples, gain };
+  const out = new Float32Array(samples.length);
+  for (let i = 0; i < samples.length; i += 1) out[i] = Math.max(-1, Math.min(1, samples[i] * gain));
+  return { samples: out, gain };
 }
 
 export function rmsOf(samples) {

@@ -22,7 +22,11 @@ $MixerCmds = @(
   "tinymix -D 1 'Mic Boost Switch' 1",
   "tinymix -D 1 'ADC PGA Gain Volume' 10",
   "tinymix -D 1 'ADC Capture Volume' 192",
-  "tinymix -D 1 'ALC Capture Switch' 1"
+  "tinymix -D 1 'ALC Capture Switch' 1",
+  # 13:05 비교(스피커 음성 녹음): 기본(목표 11·최대 20)은 쉬익 잡음이 -35dBFS로 커서, 목표 8·최대 14(잡음 -48dBFS)로 낮춘다
+  "tinymix -D 1 'ALC Capture Target Volume' 8",
+  "tinymix -D 1 'ALC Capture Max Volume' 14",
+  "tinymix -D 1 'ALC Capture Noise Gate Switch' 0"
 )
 function Set-TossMixer([string]$AdbExe, [string[]]$Target) {
   & $AdbExe @Target root 2>$null | Out-Null
