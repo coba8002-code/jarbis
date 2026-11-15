@@ -961,18 +961,23 @@ function micReset() {
 async function micStop() {
   if (!mic.cap) return;
   const ms = mic.cap.recordedMs;
-  const wav = mic.cap.stop();
+  const wav = mic.cap.stop({ normalize: true });
+  const gain = mic.cap.lastGain;
+  const lv = { heard: mic.heard, ms: Math.round(ms), peak: mic.peak.toFixed(3), rmsMax: mic.rmsMax.toFixed(4), noise: mic.seg ? mic.seg.level().toFixed(4) : '-', gain: gain.toFixed(1), why: mic.why };
+  console.info('[mic] stop ' + Object.entries(lv).map(([k, v]) => `${k}=${v}`).join(' '));
   micReset();
-  if (!mic.heard && mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 앱의 마이크 권한(‘이번만 허용’은 곧 풀려요)을 확인하고, 그래도 0이면 USB 마이크를 꽂아 주세요.'); return; }
-  if (!mic.heard || ms < 300) { status('말소리를 듣지 못했어요. 마이크 가까이에서 다시 말해 주세요.'); return; }
+  if (mic.silentHw) { status('마이크에서 신호가 전혀 들어오지 않아요(소리 크기 0). 앱의 마이크 권한(‘이번만 허용’은 곧 풀려요)을 확인하고, 그래도 0이면 USB 마이크를 꽂아 주세요.'); return; }
+  if (ms < 300) { status('말소리를 듣지 못했어요. 마이크 가까이에서 다시 말해 주세요.'); return; }
   status('받아 적는 중이에요…');
   try {
     const res = await fetch('/api/stt', { method: 'POST', headers: { 'x-jarvis-token': TOKEN, 'content-type': 'audio/wav' }, body: new Blob([wav], { type: 'audio/wav' }) });
     const data = await res.json();
+    console.info(`[mic] stt status=${res.status} chars=${(data.text ?? '').length} err=${data.error?.code ?? '-'}`);
     if (!res.ok) throw new Error(data.error?.message ?? '받아쓰기 실패');
     status('');
-    if (data.text) await ask(data.text); else status('말소리를 찾지 못했어요. 다시 말해 주세요.');
+    if (data.text) await ask(data.text); else status('말소리를 찾지 못했어요. 기기에 더 가까이 대고 또박또박 말해 주세요.');
   } catch (e) {
+    console.info(`[mic] stt failed ${e.name}: ${e.message}`);
     status('');
     note('말을 받아 적지 못했어요. 다시 말하거나 글로 적어 주세요.', String(e.message));
   }
@@ -980,11 +985,16 @@ async function micStop() {
 // 마이크를 켠 직후 0.9초는 말소리 판정에서 뺀다. 토스 프론트(es8316, 자동 이득 켬)는 켜질 때 크게 튀는 소리가 나서
 // 그걸 말로 알고 곧바로 끝내 버려, 정작 말은 담기지 않았다(2026-11-15).
 const MIC_WARMUP_MS = 900;
+// 버튼을 누른 녹음은 기준을 낮게(잡음×3, 최소 0.006) 잡고, 말 시작을 못 잡아도 6초 담은 것은 받아쓰기에 보낸다.
+// 토스 프론트 내장 마이크는 10~20cm 말소리도 0.02(이전 기준)를 못 넘어 녹음을 버렸다(2026-11-15).
+const MIC_MIN_LEVEL = 0.006;
+const MIC_FORCE_MS = 6000;
 async function micStart() {
   ambientPause();
   try {
-    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+    mic.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true } });
   } catch (e) {
+    console.info(`[mic] open failed ${e.name}`);
     status(e.name === 'NotAllowedError' ? '마이크를 쓸 수 있게 허용해 주세요. 주소창 옆 권한 메뉴에서 바꿀 수 있어요.' : e.name === 'NotFoundError' ? '마이크를 찾지 못했어요. 마이크를 연결해 주세요.' : '마이크를 열지 못했어요. 다른 앱이 쓰고 있다면 닫고 다시 눌러 주세요.');
     ambientResume();
     return;
@@ -1003,8 +1013,9 @@ async function micStart() {
   const mute = mic.ctx.createGain(); // 소리 0으로만 출력에 잇는다(소리를 내지 않음)
   mute.gain.value = 0;
   src.connect(mic.proc); mic.proc.connect(mute); mute.connect(mic.ctx.destination);
-  mic.seg = V.createSegmenter();
+  mic.seg = V.createSegmenter({ threshold: MIC_MIN_LEVEL });
   mic.heard = false;
+  mic.peak = 0; mic.rmsMax = 0; mic.why = '-'; mic.recOn = false;
   mic.silentHw = true; // 한 번이라도 0이 아닌 샘플이 오면 false(내장 마이크 배선·믹서 꺼짐 구분)
   mic.startedAt = performance.now();
   const buf = new Float32Array(analyser.fftSize);
@@ -1016,13 +1027,17 @@ async function micStart() {
   mic.timer = setInterval(() => {
     analyser.getFloatTimeDomainData(buf);
     if (mic.silentHw && buf.some((x) => x !== 0)) mic.silentHw = false;
+    feedMic(V.rmsOf(buf));
+    const now = performance.now();
+    if (now - mic.startedAt < MIC_WARMUP_MS) return;
+    if (!mic.recOn) { mic.recOn = true; mic.cap.start({ preRoll: false }); console.info(`[mic] rec on rate=${mic.ctx.sampleRate}`); } // 켜짐 잡음 뒤부터 전부 담는다
     const rms = V.rmsOf(buf);
-    feedMic(rms);
-    if (performance.now() - mic.startedAt < MIC_WARMUP_MS) return;
-    const ev = mic.seg.push(rms, performance.now());
-    if (ev === 'start') { mic.heard = true; mic.cap.start({ preRoll: true }); } // 말 시작 0.5초 앞부터 담는다
-    else if (ev === 'end' && mic.heard) micStop();
-    else if (!mic.heard && performance.now() - mic.startedAt > 8000) micStop(); // 8초 동안 말이 없으면 멈춤
+    for (const x of buf) { const a = Math.abs(x); if (a > mic.peak) mic.peak = a; }
+    if (rms > mic.rmsMax) mic.rmsMax = rms;
+    const ev = mic.seg.push(rms, now);
+    if (ev === 'start') { mic.heard = true; console.info(`[mic] speech start rms=${rms.toFixed(4)} level=${mic.seg.level().toFixed(4)}`); }
+    else if (ev === 'end' && mic.heard) { mic.why = 'end'; micStop(); }
+    else if (!mic.heard && now - mic.startedAt > MIC_FORCE_MS) { mic.why = 'timeout'; micStop(); } // 말 시작을 못 잡아도 이만큼 담은 것은 보내 본다
   }, 50);
 }
 if (micUsable) {
@@ -1244,12 +1259,12 @@ async function buildChecks() {
     button('mic', '마이크 시험', async (e) => {
       e.target.disabled = true;
       let stream;
-      try { stream = await navigator.mediaDevices.getUserMedia({ audio: true }); }
+      try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: true } }); } // 말하기 버튼과 같은 설정으로 시험
       catch (err) { set('mic', 'bad', err.name === 'NotAllowedError' ? '사용이 거부됐어요. 브라우저 권한에서 마이크를 허용해 주세요.' : err.name === 'NotFoundError' ? '마이크가 없어요.' : err.message); e.target.disabled = false; return; }
       const ctx = new AudioContext(); const an = ctx.createAnalyser(); an.fftSize = 1024;
       ctx.createMediaStreamSource(stream).connect(an);
       const buf = new Float32Array(an.fftSize); let peak = 0; let any = false; const t0 = performance.now();
-      const label = stream.getAudioTracks()[0]?.label || '이름 없음';
+      const label = stream.getAudioTracks()[0]?.label || '기본 마이크(기기가 이름을 주지 않음)';
       const tick = setInterval(() => {
         an.getFloatTimeDomainData(buf); const r = V.rmsOf(buf); peak = Math.max(peak, r); if (!any && buf.some((x) => x !== 0)) any = true;
         meter.firstChild.style.width = `${Math.min(100, Math.round(r * 400))}%`;
